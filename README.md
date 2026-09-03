@@ -158,6 +158,10 @@ bond'u ele geçiren, o cihazın trafiğini çözebilir ve cihaz taklidi yapabili
   BlueZ `info` dosyalarını kapsıyor; `pre-commit` kancası `gitleaks` koşturur.
   Yeni klonda bir kez: `git config core.hooksPath .githooks`
 
+## Lisans
+
+MIT → [LICENSE](LICENSE).
+
 ## Durum ve yol haritası
 
 - [x] Kanal seçimi ölçülerek yapıldı (ajan ↔ offline kovan)
