@@ -169,11 +169,37 @@ kanaldan söyler (host'ta `hciN` düğümü; domain'in canlı XML'inde hostdev).
 
 ```
 sudo tools/btbond-sync.py status               # tablo
-     tools/btbond-sync.py status --json        # makine-okunur (arayüz katmanı)
+     tools/btbond-sync.py status --json        # {"sides": […], "cross": […]}
 sudo tools/btbond-sync.py sync --dry-run       # ne yapılacak
 sudo tools/btbond-sync.py sync --handover      # yaz, sonra radyoyu devret
 sudo tools/btbond-sync.py sync --handover --capture-hci   # + HCI'dan uzak bilgi topla
 ```
+
+**Kapsam kullanıcının seçimi: `--domain` tekrarlanabilir.**
+
+```
+sudo tools/btbond-sync.py status --domain win11-nvme --domain win11
+```
+
+Verilmezse varsayılan domain işlenir ve tanımlı **başka** domain'ler
+*dokunulmadı* diye adlandırılır (`KAPSAM:` satırı). Bunun sebebi ölçüm: tek
+radyo, tek `BD_ADDR`, ve çevre birim **merkez adresi başına tek bond** tutuyor
+— yani bir misafirde yapılan eşleştirme diğer **bütün** tarafları bayatlatır,
+ve "sessizce birini işlemek" temiz görünen bir eksik işlemdir. Atlamanın yönü
+güvenli (eksik işlem bond bozmaz, fazlası bozar), o yüzden araç durmaz, adını
+koyar.
+
+Ulaşılamayan taraf — kapalı misafir, ajanı yanıt vermeyen misafir — **atlanır**
+ve döngüyü öldürmez; `ATLANDI` satırı sebebi söyler. Devir (`handover`) ise tek
+hedef ister: radyo tek, ve nereye gideceği tahmin edilecek bir şey değil.
+
+İkiden çok taraf okunduğunda **TARAFLAR ARASI AYRIŞMA** bölümü basılır.
+Eşleştirmeli tablolar bunu göremez: host↔A ve host↔B ayrı ayrı okunduğunda
+A ile B'nin birbirine göre durumu hiçbir tabloda yoktur. Sinyal sezginin
+tersi — cihaz **tek** anahtar tutar (en son eşleştirmeninkini), yani tek başına
+duran taraf çalışan tek taraf olabilir ve çoğunluk bayattır. Çıktı bu yüzden
+azınlığı işaretler ama **hüküm vermez**: hakem, cihazı o an bağlayabilen
+taraftır.
 
 `--capture-hci` devir **btmon yakalamasının içinde** koşar ve cihazlardan
 `LMPFeatures` / `LmpVersion` / `LmpSubversion` / `ManufacturerId` toplar —
@@ -308,8 +334,11 @@ MIT → [LICENSE](LICENSE).
       dual boot; iki taraflı doğrulandı (altı parmak izi ajanla birebir aynı),
       bölüm ve qcow2 kolları ayrı ayrı koştu
 - [ ] Offline kovan **yazma** — önce hızlı başlatma / `hiberfil` denetimi
-- [ ] Çoklu taraf: `--domain` tekrarlanabilir olsun, kapsam kullanıcının
-      seçimi olsun, ve `collect` + `distribute` iki fazlı akış
+- [x] Çoklu taraf: `--domain` tekrarlanabilir, kapsam kullanıcının seçimi,
+      ulaşılamayan taraf atlanıyor, taraflar arası ayrışma raporlanıyor
+- [ ] `collect` + `distribute` iki fazlı akış (host kanonik kopya)
+- [ ] Offline taraf `status`ta görünsün — domain'in diskini kendi bulup
+      mount etmesi gerekiyor (bugün mount elle yapılıyor)
 
 ## Bilinen boşluk
 

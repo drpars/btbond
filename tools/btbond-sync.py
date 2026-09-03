@@ -16,12 +16,19 @@ Yazma işini bu betik kendi yapmaz; her yönün tek sahibi kendi betiğidir
 (`win-to-bluez.py`, `bluez-to-win.py`) ve buradan `--only <mac>` ile
 çağrılır — mantığın ikinci bir kopyası çıkmasın diye.
 
+Kapsam kullanıcının seçimi: `--domain` **tekrarlanabilir**. Verilmezse
+varsayılan domain işlenir ve tanımlı başka domain'ler *dokunulmadı* diye
+adlandırılır — sessizce birini seçmek, üç Windows domain'i olan bir makinede
+temiz görünen bir eksik işlemdir. Ulaşılamayan taraf (kapalı misafir) atlanır,
+döngüyü öldürmez.
+
 Kullanım:
     sudo tools/btbond-sync.py status
-    tools/btbond-sync.py status --json
+    sudo tools/btbond-sync.py status --domain win11-nvme --domain win11
+    tools/btbond-sync.py status --json          # {"sides": […], "cross": […]}
     sudo tools/btbond-sync.py sync --dry-run
     sudo tools/btbond-sync.py sync --direction to-host --handover
-    sudo tools/btbond-sync.py handover --to host --capture-hci
+    sudo tools/btbond-sync.py handover --to host --capture-hci   # tek domain
 """
 
 import argparse
@@ -96,6 +103,43 @@ def render(state):
                     prints = "  ".join(f"{k}={v}" for k, v in sorted(row[side].items()))
                     lines.append(f"{'':<18}   {side:<6} {prints}")
     return "\n".join(lines)
+
+
+def render_cross(cross):
+    """Taraflar arası ayrışmayı bas — ve azınlığın ne demek OLMADIĞINI da."""
+    lines = ["", "=== TARAFLAR ARASI AYRIŞMA ===",
+             "Çevre birim TEK anahtar tutar (en son eşleştirmeninkini), yani tek",
+             "başına duran taraf çalışan tek taraf OLABİLİR ve çoğunluk bayat.",
+             "Bu bir OY DEĞİL: hakem, cihazı O AN bağlayabilen taraftır.", ""]
+    for item in cross:
+        lines.append(f"{item['dev']}  {item['name']}")
+        for label, info in sorted(item["labels"].items()):
+            lines.append(f"  {label}")
+            for fp, sides in sorted(info["groups"].items()):
+                mark = "  <- AZINLIK" if all(s in info["minority"] for s in sides) else ""
+                lines.append(f"    {fp}  {', '.join(sides)}{mark}")
+    return "\n".join(lines)
+
+
+def resolve_domains(explicit):
+    """İşlenecek domain'ler + (varsa) kapsam uyarısı.
+
+    UYARI, DURDURMA DEĞİL — ve bu, yol haritasında yazdığımdan bilerek bir
+    sapma. "Birden fazla domain varken durup listele" ergonomiyi bu makinede
+    hemen bozardı (üç domain tanımlı, ama gerçek misafir bir tane ve varsayılan
+    kodda *bilinçli* bir seçim). Kapatılması gereken tuzak "sessizce birini
+    seçmek"ti; onu kapatan şey durmak değil, **dokunulmayanı adlandırmak** —
+    ve atlamanın yönü zaten güvenli: eksik işlem bond bozmaz, fazlası bozar.
+    """
+    if explicit:
+        return list(dict.fromkeys(explicit)), None
+    others = bondsync.other_domains(bondsync.DEFAULT_DOMAIN)
+    if not others:
+        return [bondsync.DEFAULT_DOMAIN], None
+    return [bondsync.DEFAULT_DOMAIN], (
+        f"--domain verilmedi: yalnız `{bondsync.DEFAULT_DOMAIN}` işlendi. "
+        f"DOKUNULMAYAN {len(others)} domain tanımlı: {', '.join(others)}. "
+        f"Hepsini istiyorsanız her biri için --domain verin.")
 
 
 def state_path(name):
@@ -268,8 +312,10 @@ def run_sync(args, state):
         # koşulan bir tur sessizce GERÇEK `/var/lib/bluetooth`a yazar —
         # durum tablosu kopyayı, yazım aslını konuşur ve ikisi arasındaki
         # fark hiçbir yerde görünmez.
+        # Domain `state`ten alınır, `args`tan DEĞİL: `--domain` artık
+        # tekrarlanabilir ve `run_sync` taraf başına bir kez koşuyor.
         cmd = ["sudo", str(WRITER[direction]),
-               "--domain", args.domain, "--root", args.root]
+               "--domain", state["domain"], "--root", args.root]
         for row in picked:
             cmd += ["--only", row["dev"]]
         if args.force:
@@ -289,7 +335,7 @@ def run_sync(args, state):
             if args.capture_hci and not capture_target(direction):
                 print("  [hci] bu yönde yakalama atlandı: radyo host'tan ÇIKIYOR, "
                       "cihazlar misafirin içinde bağlanır ve host hiçbir olay görmez.")
-            exit_code = exit_code or handover(direction, args.domain, args.usb_id,
+            exit_code = exit_code or handover(direction, state["domain"], args.usb_id,
                                               args.dry_run, capture_to, args.settle,
                                               args.root, args.keep_hci_log)
     return exit_code
@@ -298,7 +344,12 @@ def run_sync(args, state):
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("command", choices=("status", "sync", "handover"))
-    parser.add_argument("--domain", default=bondsync.DEFAULT_DOMAIN)
+    # TEKRARLANABİLİR: kapsam kullanıcının seçimi, ve bu makinede üç Windows
+    # domain'i tanımlı. Verilmezse varsayılan işlenir ve dokunulmayanlar
+    # UYARI olarak adlandırılır → `resolve_domains`.
+    parser.add_argument("--domain", action="append", dest="domains", metavar="AD",
+                        help="işlenecek domain; tekrarlanabilir "
+                             f"(varsayılan: {bondsync.DEFAULT_DOMAIN})")
     parser.add_argument("--root", default=bluezbond.ROOT)
     parser.add_argument("--usb-id", default=bondsync.DEFAULT_USB_ID)
     parser.add_argument("--direction", choices=("to-host", "to-guest"),
@@ -325,6 +376,7 @@ def main():
     parser.add_argument("--json", action="store_true",
                         help="durumu makine-okunur bas (arayüz katmanı için)")
     args = parser.parse_args()
+    domains, scope_warning = resolve_domains(args.domains)
     if args.capture_hci == Path(CAPTURE_DEFAULT):
         args.capture_hci = state_path("remote-info.json")
     if args.capture_hci and not (args.handover or args.command == "handover"):
@@ -338,6 +390,12 @@ def main():
         # yazim varken calistirir; bu komut o bagi cozuyor.
         if not args.to_side:
             parser.error("`handover` için --to host|guest gerekir")
+        # Devir TEK hedefe olur: radyo tek, ve nereye gideceği kullanıcının
+        # niyeti. Birden çok domain verilmişse hangisi olduğu belirsizdir ve
+        # tahmin edilmez.
+        if len(domains) > 1:
+            parser.error(f"`handover` tek domain ister, {len(domains)} verildi: "
+                         f"{', '.join(domains)}")
         if os.geteuid() != 0 and args.capture_hci and not args.dry_run:
             sys.exit("--capture-hci root ister (btmon monitör soketi)")
         direction = "to-host" if args.to_side == "host" else "to-guest"
@@ -345,26 +403,51 @@ def main():
         if args.capture_hci and not capture_to:
             print("  [hci] bu yönde yakalama atlandı: radyo host'tan ÇIKIYOR, "
                   "cihazlar misafirin içinde bağlanır ve host hiçbir olay görmez.")
-        return handover(direction, args.domain, args.usb_id, args.dry_run,
+        return handover(direction, domains[0], args.usb_id, args.dry_run,
                         capture_to, args.settle, args.root, args.keep_hci_log)
 
-    try:
-        state = bondsync.survey(args.domain, args.root, args.usb_id)
-    except RuntimeError as exc:
-        sys.exit(str(exc))
+    # Ulaşılamayan taraf ATLANIR, döngüyü öldürmez → `bondsync.survey_all`.
+    survey = bondsync.survey_all(domains, args.root, args.usb_id)
 
     if args.command == "status":
-        print(json.dumps(state, indent=2, ensure_ascii=False) if args.json
-              else render(state))
+        if args.json:
+            # ŞEKİL DEĞİŞTİ (2026-09-04): tek durum nesnesi yerine daima
+            # `{"sides": [...], "cross": [...]}`. Tek domainde eski şekli
+            # döndürmek daha "uyumlu" olurdu ama şekli girdiye göre değişen
+            # bir JSON, ayrıştırıcı için değişmiş bir şekilden kötüdür.
+            print(json.dumps(survey, indent=2, ensure_ascii=False))
+            return 0
+        for side in survey["sides"]:
+            if "error" in side:
+                print(f"domain {side['domain']}  |  ATLANDI: {side['error']}\n")
+                continue
+            print(render(side))
+            print()
+        if survey["cross"]:
+            print(render_cross(survey["cross"]))
+        if scope_warning:
+            print(f"\nKAPSAM: {scope_warning}")
         return 0
 
     if args.json:
         parser.error("--json yalnız `status` ile anlamlı")
     if os.geteuid() != 0 and not args.dry_run:
         sys.exit("`sync` root ister (/var/lib/bluetooth 0700) — `sudo` ile çalıştırın")
-    print(render(state))
-    print()
-    return run_sync(args, state)
+
+    exit_code = 0
+    for side in survey["sides"]:
+        if "error" in side:
+            print(f"=== domain {side['domain']}: ATLANDI ===\n  {side['error']}\n")
+            exit_code = exit_code or 1
+            continue
+        print(render(side))
+        print()
+        exit_code = run_sync(args, side) or exit_code
+    if survey["cross"]:
+        print(render_cross(survey["cross"]))
+    if scope_warning:
+        print(f"\nKAPSAM: {scope_warning}")
+    return exit_code
 
 
 if __name__ == "__main__":

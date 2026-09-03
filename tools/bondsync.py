@@ -263,6 +263,91 @@ def survey(domain=DEFAULT_DOMAIN, root=bluezbond.ROOT, usb_id=DEFAULT_USB_ID):
     return result
 
 
+def survey_all(domains, root=bluezbond.ROOT, usb_id=DEFAULT_USB_ID):
+    """Her domain için ayrı bir `survey`; ulaşılamayan taraf ATLANIR.
+
+    Model **eşleştirmeli kalıyor** (host ↔ bir misafir) ve bu bilinçli: host
+    merkez olmak *zorunda* — aracı o koşturuyor, `/var/lib/bluetooth`u o
+    tutuyor, her misafire libvirt üzerinden yalnız o ulaşıyor, misafir başka
+    misafiri okuyamıyor. Yıldız topolojisinde host hub olduğu için
+    eşleştirmeli turların döngüsü mutlu yolda **yakınsıyor**; yeni bir
+    algoritma gerekmiyor, döngü gerekiyor.
+
+    Atlanan taraf sessiz değil: girdi `{"domain":…, "error":…}` olarak
+    listede kalır. Bunun mümkün olmasının önkoşulu `agentexec`in artık
+    `sys.exit` çağırmaması — eskiden ilk kapalı misafir bütün döngüyü
+    öldürüyordu.
+    """
+    sides = []
+    for domain in domains:
+        try:
+            sides.append(survey(domain, root, usb_id))
+        except RuntimeError as exc:                 # AgentError dahil
+            sides.append({"domain": domain, "error": str(exc)})
+    return {"sides": sides, "cross": cross_sides(sides)}
+
+
+def cross_sides(sides):
+    """Taraflar ARASI ayrışmayı bul — eşleştirmeli turun göremediği şey.
+
+    NEDEN GEREKLİ: host↔A ve host↔B ayrı ayrı okunduğunda, A ile B'nin
+    birbirine göre durumu hiçbir tablodaysa görünmez. Üstelik eşleştirmeli
+    tur aynı karar verilemez soruyu **N−1 kez** sorar ve her cevap sonrakini
+    kirletir: host'un parmak izi arada değişir, yani ikinci soru artık A'nın
+    kopyası olmuş bir host'a karşı sorulur.
+
+    SİNYAL SEZGİNİN TERSİ, ve çıktı bunu söylemek zorunda: çevre birim **tek**
+    anahtar tutar — en son eşleştirmeninkini —, yani `k1 k1 k1 k2` dizisinde
+    **tek başına duran** taraf çalışan tek taraftır ve çoğunluk bayattır.
+    O yüzden burada azınlık `minority` diye işaretleniyor; ama bu bir OY DEĞİL
+    ve hüküm de değil — hakem "cihazı O AN bağlayabilen taraf"tır (radyo bir
+    anda tek tarafta olduğu için o test her an yalnız bir tarafta mevcut).
+
+    Döner: cihaz başına `{"dev", "name", "labels": {etiket: {"groups":
+    {fp: [taraf…]}, "minority": [taraf…]}}}` — yalnız AYRIŞAN etiketler.
+    """
+    # taraf adı -> {dev: {etiket: fp}}. Host bir kez yazılır: her survey aynı
+    # host'u okuyor, yani tekrar değil aynı olgunun aynı değeri.
+    per_side = {}
+    names = {}
+    for side in sides:
+        if "error" in side:
+            continue
+        for row in side["rows"]:
+            names.setdefault(row["dev"], row["name"])
+            if row["host"]:
+                per_side.setdefault("host", {}).setdefault(row["dev"], {}).update(row["host"])
+            if row["guest"]:
+                per_side.setdefault(side["domain"], {})[row["dev"]] = row["guest"]
+
+    if len(per_side) < 3:      # host + en az iki misafir olmadan "arası" yok
+        return []
+
+    out = []
+    devices = sorted({dev for rows in per_side.values() for dev in rows})
+    for dev in devices:
+        labels = {}
+        all_labels = sorted({lab for side, rows in per_side.items()
+                             for lab in rows.get(dev, {})})
+        for label in all_labels:
+            groups = {}
+            for side, rows in per_side.items():
+                fp = rows.get(dev, {}).get(label)
+                if fp:
+                    groups.setdefault(fp, []).append(side)
+            if len(groups) < 2:
+                continue
+            smallest = min(len(v) for v in groups.values())
+            labels[label] = {
+                "groups": {fp: sorted(s) for fp, s in groups.items()},
+                "minority": sorted(s for v in groups.values() if len(v) == smallest
+                                   for s in v),
+            }
+        if labels:
+            out.append({"dev": dev, "name": names.get(dev, dev), "labels": labels})
+    return out
+
+
 def actionable(rows, direction=None):
     """Yönü belli olan satırları ver; `direction` verilirse o yöne süz."""
     picked = [r for r in rows if r["direction"]]
