@@ -15,6 +15,13 @@ dump-*.json
 SYSTEM
 SYSTEM.*
 
+# HCI captures from `btbond-sync.py --capture-hci`. What the tool wants out of
+# them (remote version/features) is device capability, not secret -- but a
+# capture that happens to span a PAIRING records key distribution over the
+# air, and nothing in the filename tells you which kind you have.
+*.btmon.log
+remote-info.json
+
 # BlueZ state copied out for inspection.
 info
 var-lib-bluetooth/

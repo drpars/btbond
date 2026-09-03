@@ -156,7 +156,16 @@ sudo tools/btbond-sync.py status               # tablo
      tools/btbond-sync.py status --json        # makine-okunur (arayüz katmanı)
 sudo tools/btbond-sync.py sync --dry-run       # ne yapılacak
 sudo tools/btbond-sync.py sync --handover      # yaz, sonra radyoyu devret
+sudo tools/btbond-sync.py sync --handover --capture-hci   # + HCI'dan uzak bilgi topla
 ```
+
+`--capture-hci` devir **btmon yakalamasının içinde** koşar ve cihazlardan
+`LMPFeatures` / `LmpVersion` / `LmpSubversion` / `ManufacturerId` toplar —
+"Bilinen boşluk"un ihtiyaç duyduğu dört alan. Yalnız radyo **host'a gelirken**
+anlamlı: ters yönde cihazlar misafirin içinde bağlanır ve host denetleyicisi
+hiçbir olay görmez. Sonuç `$XDG_STATE_HOME/btbond/remote-info.json`a birikir.
+Ham log `.gitignore`da: yakalama bir eşleştirmeye denk gelirse anahtar
+dağıtımı da o log'a girer.
 
 **Yön satırın özelliğidir, oturumun değil.** Araç "nereden nereye" diye
 sormaz: tek tarafta duran bond o yöne kopyalanır, iki tarafta tutan hiçbir şey

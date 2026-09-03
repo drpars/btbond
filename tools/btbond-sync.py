@@ -34,6 +34,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import bluezbond  # noqa: E402
 import bondsync  # noqa: E402
+import hcicapture  # noqa: E402
 
 WRITER = {
     "to-host": HERE / "win-to-bluez.py",
@@ -51,6 +52,9 @@ VERDICT_LABEL = {
 }
 
 DIRECTION_ARROW = {"to-host": "→ host", "to-guest": "→ misafir", None: ""}
+
+# `--capture-hci` çıplak verildiğinde konan nöbetçi; `main` gerçek yola çevirir.
+CAPTURE_DEFAULT = "@varsayilan"
 
 
 def render(state):
@@ -88,16 +92,69 @@ def render(state):
     return "\n".join(lines)
 
 
-def handover(direction, domain, usb_id, dry_run):
-    """Radyoyu hedef tarafa geçir — yazımdan SONRA, çünkü hedef onu okurken alır."""
+def state_path(name):
+    """Çağıran kullanıcının durum dizini — `sudo` altında root'un evi DEĞİL.
+
+    `sync` root koşuyor; `~` genişletmesi `/root`a gider ve dosya kullanıcının
+    göremeyeceği bir yere düşerdi.
+    """
+    user = os.environ.get("SUDO_USER")
+    home = Path(f"~{user}").expanduser() if user else Path.home()
+    base = os.environ.get("XDG_STATE_HOME") or (home / ".local/state")
+    return Path(base) / "btbond" / name
+
+
+def capture_target(direction):
+    """HCI yakalaması yalnız radyo **host'a** gelirken anlamlı.
+
+    Ters yönde radyo host'tan çıkar: cihazlar misafirin içinde yeniden bağlanır
+    ve host denetleyicisi hiçbir olay görmez.
+    """
+    return direction == "to-host"
+
+
+def handover(direction, domain, usb_id, dry_run, capture_to=None, settle=25):
+    """Radyoyu hedef tarafa geçir — yazımdan SONRA, çünkü hedef onu okurken alır.
+
+    `capture_to` verilirse devir **btmon yakalamasının içinde** koşar: adaptör
+    host'ta sıfırdan kurulurken bütün cihazlar taze bağlanır ve uzak sürüm /
+    özellik olayları tam o anda geçer. Yakalama devirden ÖNCE başlar; sonra
+    başlatmak hiçbir şey görmez.
+    """
     action = "--detach" if direction == "to-host" else "--attach"
     cmd = ["vfioctl", "guest", "--name", domain, "usb", action, usb_id]
     print(f"\n[devir] {' '.join(cmd)}")
     if dry_run:
-        print("  [dry-run] çalıştırılmadı")
+        print("  [dry-run] çalıştırılmadı"
+              + (f"  (yakalama da atlandı → {capture_to})" if capture_to else ""))
         return 0
+
+    capture = None
+    if capture_to:
+        capture_to.parent.mkdir(parents=True, exist_ok=True)
+        log = capture_to.with_suffix(".btmon.log")
+        print(f"  [hci] yakalama başladı → {log}")
+        capture = hcicapture.Capture(str(log), limit_seconds=settle + 60).start()
+
     sys.stdout.flush()
-    return subprocess.run(cmd, timeout=300).returncode
+    code = subprocess.run(cmd, timeout=300).returncode
+
+    if capture:
+        print(f"  [hci] cihazların bağlanması için {settle} sn bekleniyor…")
+        sys.stdout.flush()
+        parsed = hcicapture.parse(capture.stop(settle_seconds=settle))
+        print("  [hci] toplanan uzak cihaz bilgisi:")
+        for line in hcicapture.summary(parsed):
+            print("  " + line)
+        merged = {}
+        if capture_to.exists():
+            merged = json.loads(capture_to.read_text(encoding="utf-8"))
+        for address, entry in parsed.items():
+            merged.setdefault(address, {}).update(hcicapture.to_windows_fields(entry))
+        capture_to.write_text(json.dumps(merged, indent=2, sort_keys=True),
+                              encoding="utf-8")
+        print(f"  [hci] kaydedildi → {capture_to}")
+    return code
 
 
 def run_sync(args, state):
@@ -157,8 +214,13 @@ def run_sync(args, state):
         result = subprocess.run(cmd, timeout=600)
         exit_code = exit_code or result.returncode
         if result.returncode == 0 and args.handover:
+            capture_to = (args.capture_hci if args.capture_hci
+                          and capture_target(direction) else None)
+            if args.capture_hci and not capture_target(direction):
+                print("  [hci] bu yönde yakalama atlandı: radyo host'tan ÇIKIYOR, "
+                      "cihazlar misafirin içinde bağlanır ve host hiçbir olay görmez.")
             exit_code = exit_code or handover(direction, args.domain, args.usb_id,
-                                              args.dry_run)
+                                              args.dry_run, capture_to, args.settle)
     return exit_code
 
 
@@ -172,12 +234,27 @@ def main():
                         help="yalnız bu yöndeki satırları uygula (varsayılan: ikisi de)")
     parser.add_argument("--handover", action="store_true",
                         help="yazımdan sonra radyoyu hedef tarafa geçir (vfioctl)")
+    # Çıplak `--capture-hci` nöbetçi verir, `main` onu varsayılan yola çevirir.
+    # `const=None` yazılırsa çıplak biçim sessizce "yakalama kapalı" olurdu —
+    # bayrak verilmiş görünür, hiçbir şey toplanmaz.
+    parser.add_argument("--capture-hci", nargs="?", type=Path, const=Path(CAPTURE_DEFAULT),
+                        default=None, metavar="DOSYA",
+                        help="devir sırasında btmon ile uzak cihaz bilgisi topla "
+                             "(yalnız --handover ve radyo host'a gelirken); "
+                             "varsayılan hedef $XDG_STATE_HOME/btbond/remote-info.json")
+    parser.add_argument("--settle", type=int, default=25, metavar="SN",
+                        help="devirden sonra cihazların bağlanması için beklenecek süre")
     parser.add_argument("--force", action="store_true",
                         help="hedefte var olan kaydın üzerine yaz")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--json", action="store_true",
                         help="durumu makine-okunur bas (arayüz katmanı için)")
     args = parser.parse_args()
+    if args.capture_hci == Path(CAPTURE_DEFAULT):
+        args.capture_hci = state_path("remote-info.json")
+    if args.capture_hci and not args.handover:
+        parser.error("--capture-hci yalnız --handover ile anlamlı: olaylar "
+                     "radyo host'a gelirken, adaptör kurulurken geçiyor")
 
     try:
         state = bondsync.survey(args.domain, args.root, args.usb_id)
