@@ -6,13 +6,18 @@ cihazlar yeniden eşleştirmeye gerek kalmadan bağlanır.
 🇬🇧 Replicates Bluetooth pairing bonds between two operating systems that share
 one radio, so your devices keep working on whichever side currently owns it.
 
-> **Durum: Windows → Linux yönü çalışıyor ve uçtan uca ölçüldü** (2026-09-03,
-> bluez 5.87, Windows 11 misafir): bir BR/EDR kulaklık ve bir LE oyun kolu
+> **Durum: iki yön de koştu** (2026-09-03, bluez 5.87, Windows 11 misafir).
+>
+> **Windows → Linux uçtan uca ölçüldü:** bir BR/EDR kulaklık ve bir LE oyun kolu
 > Windows'ta eşleştirildi, bond'lar host'a kopyalandı, radyo host'a alındı ve
 > **iki cihaz da yeniden eşleştirilmeden bağlandı**. Radyo misafire geri
-> verildiğinde de öyle: Windows'un kendi yığını ikisini de `Connected` gösterdi
-> ve anahtarlar değişmedi — halkanın iki ucu da yeniden eşleşme istemiyor.
-> Ters yön (Linux → Windows) ve TUI henüz yok.
+> verildiğinde de öyle — anahtarlar değişmedi.
+>
+> **Linux → Windows:** LE tamamen çalışıyor — kol misafirde yeniden
+> eşleştirmesiz bağlandı ve HID cihazı olarak göründü. BR/EDR'de bond, kimlik
+> doğrulaması ve SDP çalışıyor; ama Windows profil devnode'larını (A2DP, AVRCP,
+> HFP) ancak cihazdan **öğrenilen** dört alanı bildiğinde kuruyor ve o alanlar
+> BlueZ dosyalarında yok → "Bilinen boşluk". TUI henüz yok.
 
 ---
 
@@ -66,9 +71,34 @@ HKLM\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\
 │      LTK, IRK     : REG_BINARY  16
 │      KeyLength, EDIV, AddressType, AuthReq, CEntralIRKStatus : REG_DWORD
 │      ERand, Address : REG_QWORD             <- Address = cihazın BD_ADDR'i
-└── Devices\<cihaz-mac>
-       Name         : REG_BINARY              <- UTF-8, NUL ile biten cihaz adı
+└── Devices\<cihaz-mac>                       <- CİHAZ/PROFİL KAYDI
+       Name, LEName : REG_BINARY              <- UTF-8, NUL ile biten cihaz adı
+       COD | LEAppearance, LEAddressType, VID, PID, VIDType, Version : REG_DWORD
+       LeContainerId : REG_BINARY 16          <- LeContainerIDSource=1 ile
+       CachedServices\<0001000N> : REG_BINARY <- ham SDP kayıtları (BR/EDR)
+       ServicesFor<adaptör-mac>               <- eşleşmenin "kullanılabilir" yarısı
+          BR/EDR: SSP Paired/MITM/Supported, AuthenticationRequirements,
+                  RemoteAuthenticationRequirements, IoCapability,
+                  BasebandSupport, BRFlags, BRExtendedDeviceInfoFlags
+          LE:     AuthenticationRequirementsLE, RemoteAuthenticationRequirementsLE,
+                  IoCapabilityLE, BasebandSupport, LEFlags, LEExtendedDeviceInfoFlags
+          BR/EDR profil alt anahtarları: {uuid}\C00000000
+                  Enabled=1, Instance=1, CounterInstanceId=0,
+                  PriLangServiceName = 256 bayt SIFIR (ölçüldü)
 ```
+
+**Bond iki parçalıdır, ve ikisi de gerekir.** `Keys` kriptoyu taşır; `Devices`
+cihaz kaydını. Yalnız `Keys` yazıldığında Windows cihazı **`paired` gösterir**
+ve yazılan anahtarla **gerçek bir kimlik doğrulamalı bağlantı kurar** — ama
+cihaz kullanılamaz: LE'de `Enum\BTHLE` düğümü hiç doğmaz, BR/EDR'de yalnız
+jenerik devnode doğar. Enum düğümlerini elle yazmak **gerekmez**; Windows onları
+bu iki parçadan kendisi kurar.
+
+**BlueZ karşılığı doğrudan var:** `COD` ← `Class`, `LEAppearance` ←
+`Appearance`, `VID/PID/VIDType/Version` ← `[DeviceID]`, `LEAddressType` ←
+`AddressType`, profil `{uuid}` alt anahtarları ← `Services=`, ve
+`CachedServices` ← `cache/<mac>` dosyasındaki `[ServiceRecords]` — **baytlar
+birebir aynı**, yeniden üretmek gerekmiyor.
 
 **BlueZ karşılığı** (`/var/lib/bluetooth/<adaptör>/<cihaz>/info`):
 
@@ -129,8 +159,26 @@ bluetoothctl connect <cihaz-mac>                # asıl sınama
 Var olan bir `info` dosyası **üzerine yazılmaz**; `--force` verilirse önce
 `info.bak-<zaman>` olarak yedeklenir. `--only <mac>` tek cihazı seçer.
 
+**Linux → Windows replikasyonu.** Aynı kural, ayna simetrisi: **hedef tarafta
+radyo yokken yazılır.** BlueZ bond'ları adaptör kurulurken okur, Windows ise
+BTHPORT sürücüsü başlarken — yani radyo devri her iki tarafta da "taze oku"
+anıdır.
+
+```
+sudo tools/bluez-to-win.py --dry-run            # ne yazılacak
+sudo tools/bluez-to-win.py                      # misafirin kayıt defterine yaz
+vfioctl guest --name <domain> usb --attach 8087:0032   # radyoyu misafire ver
+sudo tools/bluez-to-win.py --remove --only <mac>       # bond'u misafirden sil
+```
+
+Misafirde zaten olan bond **üzerine yazılmaz**; `--force` gerekir. Betik
+misafire `-EncodedCommand` ile gider ve Windows'un komut satırı sınırı aşılırsa
+`guest-exec` *"Failed to execute helper program (Invalid argument)"* ile düşer;
+bu yüzden yazım partilere bölünür.
+
 **Doğrulama** — iki tarafın aynı anahtar materyalini taşıdığını radyoyu
-oynatmadan söyler. Karşılaştırma sha256'nın ilk 12 hex'i üzerinden yapılır,
+oynatmadan söyler. Yönsüzdür: iki tarafı karşılaştırır, hangi yönde replike
+edildiğinden bağımsızdır. Karşılaştırma sha256'nın ilk 12 hex'i üzerinden yapılır,
 yani çıktı anahtar sızdırmaz ve bayt sırasını da adlandırır:
 
 ```
@@ -172,8 +220,29 @@ MIT → [LICENSE](LICENSE).
 - [x] BlueZ `info` biçimini birinci elden ölç (BR/EDR ve LE ayrı)
 - [x] Windows → Linux replikasyonu — iki cihazda uçtan uca doğrulandı
 - [x] İki tarafın aynı anahtarı taşıdığını doğrulayan `--verify`
-- [ ] Linux → Windows replikasyonu (kayıt defterine yazma)
+- [x] Windows bond'unun iki parçalı olduğunu ölç (`Keys` + `Devices`)
+- [x] Linux → Windows replikasyonu — LE uçtan uca, BR/EDR kısmi
+- [ ] BR/EDR'in öğrenilen alanları → "Bilinen boşluk"
 - [ ] Adaptör IRK'si: Windows `CentralIRK` ↔ BlueZ yerel kimlik (RPA kullanan
       cihazlar için gerekebilir; iki test cihazı da public adres kullanıyordu)
+- [ ] Tek komutluk akış (`btbond sync`)
 - [ ] TUI
 - [ ] Dual boot (offline kovan) arka ucu
+
+## Bilinen boşluk
+
+Windows, BR/EDR profil devnode'larını (A2DP, AVRCP, HFP) ancak cihazın **neyi
+desteklediğini** bildiğinde kuruyor. O bilgi `Devices\<mac>` altındaki dört
+alanda: `LMPFeatures`, `ManufacturerId`, `LmpVersion`, `LmpSubversion`. Windows
+bunları cihaza bağlanınca kendisi öğrenir — ama bond kaydı yeni yazıldığında
+henüz yoktur, ve onlar olmadan ses uç noktası çıkmaz.
+
+Bunlar **hiçbir BlueZ dosyasında yok** (`info` da, `cache/<mac>` da taşımıyor);
+HCI'dan `Read Remote Version Information` / `Read Remote Supported Features`
+ile okunur, ki bunun için `hcitool` gerekir ve modern bluez kurulumlarında o
+paket ayrıdır. Ölçüldüğünde beş profil düğümü de doğdu ve ses geldi, yani
+tetikleyici oldukları doğrulandı — ama hangisinin tek başına yettiği
+ayrılmadı.
+
+Bu boşluk **yalnız BR/EDR profillerini** etkiler: bond, kimlik doğrulaması ve
+LE tarafının tamamı bu alanlar olmadan da çalışıyor.
