@@ -70,7 +70,7 @@ def batches(chunks, budget=BATCH_BUDGET):
 
 
 def guest_state(domain):
-    """Misafirdeki mevcut bond yapısını oku (adapters, names)."""
+    """Misafirdeki mevcut bond yapısını oku (adapters, names, devices)."""
     exitcode, stdout, stderr = run_powershell(domain, winbond.DUMP_POWERSHELL)
     if exitcode != 0:
         sys.exit(f"misafir okuma komutu exitcode={exitcode}\n{stderr}")
@@ -243,7 +243,7 @@ def main():
     bonds = bluezbond.list_bonds(args.root, adapter)
     only = {m.upper() for m in args.only}
 
-    guest, _guest_names = guest_state(args.domain)
+    guest, _guest_names, _guest_devices = guest_state(args.domain)
     print(f"adaptör {adapter}  (host bond: {len(bonds)})")
     if adapter not in guest:
         print("  misafirde bu adaptörün anahtarı YOK — ilk yazımda oluşturulacak.")

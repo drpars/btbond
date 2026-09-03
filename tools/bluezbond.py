@@ -24,8 +24,14 @@ buradan okur.
     Key=<32 hex>
     Authenticated=0
     EncSize=16
-    EDiv=0
-    Rand=0
+    EDiv=0                              <- legacy eşleştirmede sıfır DEĞİL
+    Rand=0                              <- işaretsiz 64-bit
+
+    [LocalSignatureKey]                 <- yalnız imza anahtarı dağıtan cihaz
+    [RemoteSignatureKey]
+    Key=<32 hex>
+    Counter=<32-bit>
+    Authenticated=0
 
 `Class`, `Services`, `Appearance`, `ConnectionParameters`, `DeviceID`
 YAZILMAZ — BlueZ ilk bağlantıda kendisi ekliyor ve bizim yazdığımız anahtar
@@ -217,14 +223,19 @@ def bredr_info(name, link_key, key_type, order):
     ])
 
 
-def le_info(name, bond, order, authenticated):
-    """LE bond'u için `info` içeriği üret (`bond` = Windows LE alan sözlüğü)."""
-    from winbond import key_hex
+def le_info(name, bond, order, authenticated, addr_type_code):
+    """LE bond'u için `info` içeriği üret (`bond` = Windows LE alan sözlüğü).
 
-    addr_type = "public" if int(bond.get("AddressType", 0)) == 0 else "static"
-    enc_size = int(bond.get("KeyLength", 16))
-    ediv = int(bond.get("EDIV", 0))
-    rand = int(bond.get("ERand", 0))
+    `addr_type_code` çağırandan gelir (0 public / 1 random). Kaynağı `Keys`
+    olmayabilir — bazı cihazda o alan hiç yazılmıyor; kararı
+    `winbond.le_address_type` verir.
+    """
+    from winbond import as_uint, key_hex
+
+    addr_type = "public" if addr_type_code == 0 else "static"
+    enc_size = as_uint(bond.get("KeyLength", 16), 32)
+    ediv = as_uint(bond.get("EDIV", 0), 32)
+    rand = as_uint(bond.get("ERand", 0), 64)
 
     lines = [
         "[General]",
@@ -247,7 +258,58 @@ def le_info(name, bond, order, authenticated):
             f"Rand={rand}",
             "",
         ]
+    lines += _signature_sections(bond, order, authenticated)
     return "\n".join(lines)
+
+
+# Windows ↔ BlueZ imza anahtarı eşlemesi. Yön TÜRETİM, ölçüm değil: "Inbound"
+# = gelen imzalı veriyi doğrulamak için tutulan **uzak** anahtar → BlueZ'in
+# `RemoteSignatureKey`'i; giden veriyi imzalayan **yerel** anahtar →
+# `LocalSignatureKey`. Ters yön (`bluez-to-win.py` `le_fields`) aynı eşlemeyi
+# zaten kullanıyor; iki fonksiyon birbirinin tersi olmak zorunda.
+#
+# Grup ve alan adları önce bluez 5.87-2 ikilisinde ayrı dize olarak
+# doğrulandı (`LocalSignatureKey`, `RemoteSignatureKey`, `Counter`,
+# `Authenticated`), SONRA davranış ölçüldü: yazdığımız iki bölüm bağlantıdan
+# sonra BlueZ tarafından okunup geri yazıldı — yani kayıt tüketiliyor, yalnız
+# duruyor değil. (`Key` ve `LongTermKey` ikilide ayrı dize olarak GÖRÜNMÜYOR
+# ama gerçek `info` dosyalarında var: `strings` bir uzun dizenin sonekini
+# ayrıca basmaz, yani orada yokluk kanıt değil.)
+SIGNATURE_MAP = (
+    ("LocalSignatureKey", "CSRK", "OutboundSignCounter"),
+    ("RemoteSignatureKey", "CSRKInbound", "InboundSignCounter"),
+)
+
+# BlueZ `Counter`ı 32-bit okuyor; Windows'un "henüz imzalı veri gelmedi"
+# nöbetçisi `InboundSignCounter = -1` (işaretsiz 0xFFFF…FFFF) oraya sığmıyor,
+# ve sığsaydı "bundan küçük her sayacı reddet" anlamına gelirdi. Sığmayan
+# değer 0'a iniyor — TÜRETİM, ölçülmedi.
+_COUNTER_MAX = (1 << 32) - 1
+
+
+def _signature_sections(bond, order, authenticated):
+    """`CSRK`/`CSRKInbound` varsa BlueZ imza anahtarı bölümlerini üret."""
+    from winbond import as_uint, key_hex
+
+    # `Authenticated` bu iki bölümde BOOLEAN, `[LongTermKey]`de tam sayı —
+    # ölçüldü (2026-09-04): yazdığımız `0` BlueZ tarafından okundu ve dosya
+    # geri yazılırken `false`a normalize edildi, LTK'nınki `0` kaldı. İkisi de
+    # kabul ediliyor; BlueZ'in kendi yazımı taklit ediliyor ki `--force` turu
+    # gereksiz fark üretmesin.
+    auth = "true" if int(authenticated) else "false"
+    lines = []
+    for section, key_field, counter_field in SIGNATURE_MAP:
+        if key_field not in bond:
+            continue
+        counter = as_uint(bond.get(counter_field, 0), 64)
+        lines += [
+            f"[{section}]",
+            f"Key={key_hex(bond[key_field], order)}",
+            f"Counter={0 if counter > _COUNTER_MAX else counter}",
+            f"Authenticated={auth}",
+            "",
+        ]
+    return lines
 
 
 # BlueZ'in ilk bağlantıda kendisi eklediği, bizim üretmediğimiz alanlar.
@@ -255,8 +317,14 @@ def le_info(name, bond, order, authenticated):
 # Windows'un `COD`, `LEAppearance`, `VID/PID/Version` ve profil UUID'lerini
 # türetiyor. Korunmazsa bir `--force` turu ters yönü sessizce sakatlar
 # (ölçüldü 2026-09-03: alanlar gitti, hata yok, çıkış kodu 0).
+# İmza anahtarları da listede: `merge_preserved` yalnız yeni içerikte OLMAYAN
+# bölümü taşır, yani misafirde `CSRK` varsa üzerine yazılır — yoksa host'un
+# kendi eşleştirmesinden kalan anahtar korunur. Bayat bir imza anahtarı
+# tutmak, anahtarı sessizce düşürmekten iyidir: bu depoda ödenmiş hata tam
+# olarak sessiz düşürmedir.
 PRESERVED_GENERAL = ("Class", "Services", "Appearance", "CablePairing", "WakeAllowed")
-PRESERVED_SECTIONS = ("ConnectionParameters", "DeviceID")
+PRESERVED_SECTIONS = ("ConnectionParameters", "DeviceID",
+                      "LocalSignatureKey", "RemoteSignatureKey")
 
 
 def merge_preserved(existing, content):

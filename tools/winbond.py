@@ -13,13 +13,23 @@ biri ilerler, öbürü donar ve donduğunu okuyucuya söylemezdi.
         LTK, IRK          : Binary len=16
         KeyLength, EDIV, AddressType, AuthReq, CEntralIRKStatus : DWord
         ERand, Address    : QWord
+        CSRK, CSRKInbound : Binary len=16      <- yalnız imza anahtarı dağıtan cihazda
+        OutboundSignCounter : DWord ; InboundSignCounter : QWord
     Devices\\<cihaz-mac>
         Name              : Binary             <- UTF-8, NUL ile biten cihaz adı
+        LEAddressType     : DWord              <- 0 public, 1 random
 
 Yani iki teknoloji iki ayrı biçimde duruyor: Klasik bond adaptör anahtarının
 altında **bir değer**, LE bond **bir alt anahtar**. Ayrım ölçüldü, tahmin
 değil — Soundcore Life Q10 (BR/EDR) ve Xbox Wireless Controller (LE) aynı
 anda eşleştirilerek.
+
+**ALAN KÜMESİ CİHAZA GÖRE DEĞİŞİYOR, ve eksiklik sessizdir** (ölçüldü
+2026-09-04, ROG GLADIUS III WL eklenerek). LE **legacy** eşleştiren cihazda
+`EDIV`/`ERand` sıfır değil, buna karşılık `AddressType`, `Address` ve `IRK`
+**hiç yazılmıyor**; imza anahtarı dağıtan cihazda dört `CSRK*` alanı
+ekleniyor. Yani bir alanın yokluğu "varsayılan değeri" demek değil — cevap
+`Devices\\<mac>`te olabilir (→ `le_address_type`).
 
 GİZLİLİK: bu modül anahtar baytını stdout'a basmaz. Karşılaştırma gereken
 yerde `fingerprint()` kullanılır (sha256'nın ilk 12 hex'i).
@@ -57,6 +67,14 @@ BREDR_SERVICE_FLAGS = {
     "BRFlags": 0,
 }
 
+# `LEFlags` CİHAZA GÖRE DEĞİŞİYOR — ölçüldü (2026-09-04), ve dördüncü alan
+# değişmiyor: Xbox kolunda `268632064` (0x10030000), ROG faresinde `720896`
+# (0x000B0000); aynı iki cihazda `AuthenticationRequirementsLE`,
+# `RemoteAuthenticationRequirementsLE`, `IoCapabilityLE` ve `BasebandSupport`
+# birebir aynı. Yani buradaki sabit yalnız Xbox'ın değeri; nasıl türetildiği
+# BİLİNMİYOR ve BlueZ'de karşılığı aranmadı. Fare henüz ters yönde
+# yazılmadığı için yanlış `LEFlags`in neyi bozduğu da ölçülmedi.
+# Farenin kaydında ayrıca `LEExtendedDeviceInfoFlags = 0` var (burada yok).
 LE_SERVICE_FLAGS = {
     "AuthenticationRequirementsLE": 3,
     "RemoteAuthenticationRequirementsLE": 255,
@@ -219,6 +237,73 @@ def key_hex(raw_hex, order):
     return data.hex().upper()
 
 
+def as_uint(value, bits):
+    """Ajanın bastığı DWORD/QWORD'ü işaretsiz sayıya çevir.
+
+    PowerShell `GetValue` bir QWORD'ü `[Int64]`, DWORD'ü `[Int32]` olarak
+    döndürüyor: üst biti dolu olan gerçek bir değer **negatif** basılıyor.
+    ÖLÇÜLDÜ (2026-09-04, ROG GLADIUS III WL): `ERand = -241429041862138248`,
+    `InboundSignCounter = -1`. BlueZ `Rand` alanını işaretsiz okur, yani
+    çevrilmeden yazılan değer o alanın anlamını değiştirir.
+
+    Xbox kolunda iki alan da 0 olduğu için bu tuzak ilk turda görünmedi —
+    LE **legacy** eşleştirme (EDIV/ERand sıfır değil) ilk kez bu cihazla
+    ölçüldü.
+    """
+    value = int(value)
+    return value + (1 << bits) if value < 0 else value
+
+
+# Bir değerin anahtar materyali olup olmadığı ADA göre değil UZUNLUĞA göre
+# sorulur: 16 bayt (32 hex) ve saf hex ise anahtardır. Ad bazlı eleme bir kez
+# ödendi — `CSRK`/`CSRKInbound` listede olmadığı için `--dry-run` çıktısında
+# baytlarıyla stdout'a düştü (2026-09-04). Sayısal alanlar bu sondaya
+# takılamaz: en geniş DWORD/QWORD ondalık gösterimi 20 basamak, eşik 32.
+_HEX_DIGITS = set("0123456789abcdefABCDEF")
+
+
+def looks_like_key(value):
+    """Değer bir anahtar materyali mi (>=32 hex basamak, saf hex)?"""
+    text = str(value)
+    return len(text) >= 32 and len(text) % 2 == 0 and set(text) <= _HEX_DIGITS
+
+
+def redact(mapping):
+    """Bir alan sözlüğünü basıma hazırla: anahtarların BAYTI BASILMAZ.
+
+    Anahtar görünen her değer parmak iziyle değiştirilir; geri kalan olduğu
+    gibi kalır. Çıktı nota ve hata kaydına yapıştırılabilir.
+    """
+    out = {}
+    for name, value in mapping.items():
+        out[name] = f"fp={fingerprint(value)}" if looks_like_key(value) else value
+    return out
+
+
+def le_address_type(bond, props):
+    """LE cihazın adres tipini ver: `(0|1, kaynak)` — 0 public, 1 random.
+
+    İKİ KAYNAK, ve `Keys` her cihazda taşımıyor (ölçüldü 2026-09-04):
+
+        cihaz                    Keys\\…\\<mac>\\AddressType   Devices\\<mac>\\LEAddressType
+        Xbox Wireless Controller  0                            0
+        ROG GLADIUS III WL        (YOK)                        1
+
+    Yani `bond.get("AddressType", 0)` varsayılanı faresi için sessizce
+    **yanlış** cevap veriyordu: `public` yazılan bir static-random cihazı
+    BlueZ bulamaz. Eksikse `Devices` kaydına düşülür.
+
+    Adresin üst iki biti (`D4` → `11` → static random) yalnız **doğrulayıcı**
+    olarak kullanılır, karar verici olarak değil: bit kuralı ancak adres zaten
+    rastgeleyse anlamlıdır, public bir OUI de aynı bitleri taşıyabilir.
+    """
+    if "AddressType" in bond:
+        return as_uint(bond["AddressType"], 32), "Keys"
+    if "LEAddressType" in props:
+        return as_uint(props["LEAddressType"], 32), "Devices"
+    return 0, "varsayılan (iki kaynakta da yok)"
+
+
 def parse_dump(stdout):
     """Ajan çıktısını {anahtar-yolu: {değer-adı: (tip, değer)}} sözlüğüne çevir."""
     tree = {}
@@ -245,10 +330,16 @@ def collect(tree):
     """Ölçülen ağacı adaptör → bond yapısına çevir.
 
     Döner: ({adaptör-mac: {"bredr": {...}, "le": {...}, "central_irk": ...}},
-            {cihaz-mac: ad})
+            {cihaz-mac: ad},
+            {cihaz-mac: {`Devices\\<mac>` alanları}})
+
+    Üçüncü sözlük `Keys`te bulunmayan ama bond'un anlamını taşıyan alanlar
+    için: `LEAddressType` orada duruyor ve bazı cihazlarda `Keys` karşılığı
+    hiç yazılmıyor → `le_address_type`.
     """
     adapters = {}
     names = {}
+    devices = {}
 
     for path, values in tree.items():
         parts = split_path(path)
@@ -257,8 +348,11 @@ def collect(tree):
 
         if parts[0] == "Devices" and len(parts) == 2:
             mac = mac_from_hex12(parts[1])
+            if not mac:
+                continue
+            devices[mac] = {name: value for name, (kind, value) in values.items()}
             kind_value = values.get("Name")
-            if mac and kind_value and kind_value[0] == "Binary":
+            if kind_value and kind_value[0] == "Binary":
                 raw = bytes.fromhex(kind_value[1])
                 names[mac] = raw.split(b"\x00", 1)[0].decode("utf-8", "replace")
             continue
@@ -288,7 +382,7 @@ def collect(tree):
             entry = adapters.setdefault(adapter, {"bredr": {}, "le": {}, "central_irk": None})
             entry["le"][dev] = {name: value for name, (kind, value) in values.items()}
 
-    return adapters, names
+    return adapters, names, devices
 
 
 def name_blob(name):

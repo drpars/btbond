@@ -49,6 +49,16 @@ def compare_key(guest_hex, host_hex):
     return "EŞLEŞMİYOR", fingerprint(guest_hex)
 
 
+# Doğrulanan LE anahtarları. `SIGNATURE_MAP`ten türetiliyor ki eşleme tek
+# yerde kalsın: yeni bir anahtar bölümü eklendiğinde `--verify` kendiliğinden
+# onu da karşılaştırsın — listeyi elle tutmak, sessizce doğrulanmayan bir
+# anahtar bırakmanın yoludur.
+LE_KEY_SECTIONS = (
+    ("LTK", "LongTermKey"),
+    ("IRK", "IdentityResolvingKey"),
+) + tuple((key_field, section) for section, key_field, _ in bluezbond.SIGNATURE_MAP)
+
+
 def verify(adapters, names, root, only):
     """Misafir ile host'un aynı anahtar materyalini taşıdığını doğrula."""
     problems = 0
@@ -69,7 +79,7 @@ def verify(adapters, names, root, only):
                 continue
             info = bluezbond.read_info(root, adapter, dev)
             print(f"  LE     {dev}  \"{names.get(dev, dev)}\"")
-            for win_name, section in (("LTK", "LongTermKey"), ("IRK", "IdentityResolvingKey")):
+            for win_name, section in LE_KEY_SECTIONS:
                 if win_name not in bond:
                     continue
                 host_key = info[section].get("Key") if info and info.has_section(section) else None
@@ -102,7 +112,7 @@ def main():
     if exitcode != 0:
         sys.exit(f"misafir komutu exitcode={exitcode}\n{stderr}")
 
-    adapters, names = winbond.collect(winbond.parse_dump(stdout))
+    adapters, names, devices = winbond.collect(winbond.parse_dump(stdout))
     if not adapters:
         sys.exit("misafirde hiç bond yok (Keys altında adaptör anahtarı bulunamadı)")
 
@@ -149,12 +159,18 @@ def main():
             if only and dev not in only:
                 continue
             name = names.get(dev, dev)
-            fields = ", ".join(f"{k}={v}" for k, v in sorted(bond.items())
-                               if k not in ("LTK", "IRK"))
-            print(f"  LE     {dev}  \"{name}\"  [{fields}]")
+            addr_code, addr_source = winbond.le_address_type(bond, devices.get(dev, {}))
+            # Anahtar baytları BASILMAZ: eleme ada göre değil değere göre
+            # (`winbond.redact`) — ad bazlı liste `CSRK`i kaçırmıştı.
+            fields = ", ".join(f"{k}={v}" for k, v in
+                               sorted(winbond.redact(bond).items()))
+            print(f"  LE     {dev}  \"{name}\"  "
+                  f"AddressType={addr_code} (kaynak: {addr_source})")
+            print(f"           [{fields}]")
             content = bluezbond.merge_preserved(
                 bluezbond.read_info(args.root, adapter, dev),
-                bluezbond.le_info(name, bond, args.key_order, args.authenticated))
+                bluezbond.le_info(name, bond, args.key_order, args.authenticated,
+                                  addr_code))
             written += bluezbond.write_info(args.root, adapter, dev, content,
                                             args.force, args.dry_run)
 
