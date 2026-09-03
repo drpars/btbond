@@ -9,8 +9,10 @@ one radio, so your devices keep working on whichever side currently owns it.
 > **Durum: Windows → Linux yönü çalışıyor ve uçtan uca ölçüldü** (2026-09-03,
 > bluez 5.87, Windows 11 misafir): bir BR/EDR kulaklık ve bir LE oyun kolu
 > Windows'ta eşleştirildi, bond'lar host'a kopyalandı, radyo host'a alındı ve
-> **iki cihaz da yeniden eşleştirilmeden bağlandı**. Ters yön (Linux → Windows)
-> ve TUI henüz yok.
+> **iki cihaz da yeniden eşleştirilmeden bağlandı**. Radyo misafire geri
+> verildiğinde de öyle: Windows'un kendi yığını ikisini de `Connected` gösterdi
+> ve anahtarlar değişmedi — halkanın iki ucu da yeniden eşleşme istemiyor.
+> Ters yön (Linux → Windows) ve TUI henüz yok.
 
 ---
 
