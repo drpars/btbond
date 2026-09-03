@@ -146,6 +146,33 @@ vfioctl guest --name <domain> usb --detach <vendor>:<product>
 
 ## Kullanım
 
+**Önce durum: `btbond-sync.py status`.** İki tarafı okur, cihaz cihaz
+karşılaştırır ve her satırın hükmünü verir — `eşleşiyor`, `yalnız host'ta`,
+`yalnız misafirde`, `ANAHTAR FARKLI`. Radyonun nerede olduğunu iki bağımsız
+kanaldan söyler (host'ta `hciN` düğümü; domain'in canlı XML'inde hostdev).
+
+```
+sudo tools/btbond-sync.py status               # tablo
+     tools/btbond-sync.py status --json        # makine-okunur (arayüz katmanı)
+sudo tools/btbond-sync.py sync --dry-run       # ne yapılacak
+sudo tools/btbond-sync.py sync --handover      # yaz, sonra radyoyu devret
+```
+
+**Yön satırın özelliğidir, oturumun değil.** Araç "nereden nereye" diye
+sormaz: tek tarafta duran bond o yöne kopyalanır, iki tarafta tutan hiçbir şey
+istemez. Geriye tek gerçek belirsizlik kalır — aynı cihaz, iki tarafta,
+**farklı anahtar** — ve `sync` onu **hiçbir zaman kendiliğinden çözmez**:
+hangi tarafın yeni olduğunu bilemez ve yanlış seçim çalışan bir bond'u yok
+eder. O satır için iki komut basılır, kararı kullanıcı verir.
+
+**`sync` yazma sırasını kural olarak uygular:** hedef taraf radyoyu tutuyorsa
+durur. Yanlış sırada yazmak hata vermez, sessizce etkisiz kalır — bu yüzden
+sıra tavsiye değil kapı. Hedefin radyoyu tutup tutmadığı **ölçülemezse** de
+durur; varsayımla geçilmez.
+
+Aşağıdaki iki bölüm tek tek yönleri anlatır; `sync` bu betikleri
+`--only <mac>` ile çağırır, mantığın ikinci kopyası yoktur.
+
 **Windows → Linux replikasyonu.** Sıra önemli: önce yaz, sonra radyoyu al.
 
 ```
@@ -224,8 +251,10 @@ MIT → [LICENSE](LICENSE).
 - [x] Linux → Windows replikasyonu — LE uçtan uca, BR/EDR kısmi
 - [ ] BR/EDR'in öğrenilen alanları → "Bilinen boşluk"
 - [ ] Adaptör IRK'si: Windows `CentralIRK` ↔ BlueZ yerel kimlik (RPA kullanan
-      cihazlar için gerekebilir; iki test cihazı da public adres kullanıyordu)
-- [ ] Tek komutluk akış (`btbond sync`)
+      cihazlar için gerekebilir; üç test cihazının ikisi public, biri static
+      random — hiçbiri dönen adres kullanmıyor, yani kol hâlâ ölçülmedi)
+- [x] Tek komutluk akış (`btbond-sync.py status` / `sync`) — yön satırın
+      özelliği, yazma sırası kapı olarak uygulanıyor
 - [ ] TUI
 - [ ] Dual boot (offline kovan) arka ucu
 
@@ -238,9 +267,13 @@ bunları cihaza bağlanınca kendisi öğrenir — ama bond kaydı yeni yazıld�
 henüz yoktur, ve onlar olmadan ses uç noktası çıkmaz.
 
 Bunlar **hiçbir BlueZ dosyasında yok** (`info` da, `cache/<mac>` da taşımıyor);
-HCI'dan `Read Remote Version Information` / `Read Remote Supported Features`
-ile okunur, ki bunun için `hcitool` gerekir ve modern bluez kurulumlarında o
-paket ayrıdır. Ölçüldüğünde beş profil düğümü de doğdu ve ses geldi, yani
+HCI'dan okunur. `LMPFeatures` bu yoldan **çözüldü**: `btmon` (bluez-utils
+içinde, ek kurulum yok) cihazın ACL'i yeniden kurulurken
+`Read Remote Supported Features` olayını basıyor ve baytların little-endian
+okunuşu Windows'un aynı cihaz için yazdığı QWORD'e birebir eşit çıktı.
+Kalan üç alan `Read Remote Version Information`dan gelir ve o olay ölçülen
+kopar-kur turunda **ateşlemedi** — çekirdek onu koşulsuz istemiyor.
+Ölçüldüğünde beş profil düğümü de doğdu ve ses geldi, yani
 tetikleyici oldukları doğrulandı — ama hangisinin tek başına yettiği
 ayrılmadı.
 
