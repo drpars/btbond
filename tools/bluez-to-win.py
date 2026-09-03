@@ -41,6 +41,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import bluezbond  # noqa: E402
 import winbond  # noqa: E402
+import agentexec  # noqa: E402
 from agentexec import run_powershell  # noqa: E402
 
 
@@ -207,7 +208,7 @@ def plan_removals(adapter, guest, only):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--domain", default="win11-nvme")
+    parser.add_argument("--domain", default=agentexec.DEFAULT_DOMAIN)
     parser.add_argument("--root", default=bluezbond.ROOT,
                         help=f"BlueZ durum dizini (varsayılan {bluezbond.ROOT})")
     parser.add_argument("--adapter", help="host adaptör MAC'i (varsayılan: tek olanı)")

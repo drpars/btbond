@@ -24,11 +24,15 @@ değerlerle dolduruyor — bu modül o boşluğun makineleşmiş hâli.
   alan adları btmon'un biçiminden yazıldı, ölçümden değil. `summary()` bunu
   saklamaz: özellikler gelip sürüm gelmediyse **söyler**.
 
-GİZLİLİK, ve burada ayrım ince: bu modülün **okuduğu** olaylar cihaz yeteneği
-taşır, bond anahtarı değil. Ama bıraktığı **ham log** öyle değil — yakalama
-bir **eşleştirmeye** denk gelirse anahtar dağıtımı HCI'dan geçer ve log'a
-girer, ve dosya adı iki durumu ayırt etmez. O yüzden `*.btmon.log`
-`.gitignore`da, ve yakalama penceresi devirle sınırlı tutuluyor.
+GİZLİLİK — **ham log her koşuda anahtar taşır**, ve bu ölçüldü (2026-09-04),
+tahmin değil. Modülün *okuduğu* olaylar cihaz yeteneğidir, ama btmon MGMT
+kanalını da basar ve bluetoothd adaptör açılışında bond'ları çekirdeğe
+yüklerken `Load Link Keys` / `Load Long Term Keys` / `Load Identity Resolving
+Keys` komutları `Key[16]:` altında **düz baytları** gösterir. Yakalama tam da
+adaptörün kurulduğu ana denk geldiği için istisna değil **kural** bu.
+
+Sonuç üç önlem: log **0600** açılır, ayrıştırmadan sonra **silinir**
+(`keep_log=True` denmedikçe), ve `*.btmon.log` `.gitignore`dadır.
 """
 
 import os
@@ -45,6 +49,20 @@ ADDRESS_RE = re.compile(r"Address:\s*([0-9A-Fa-f:]{17})")
 HANDLE_RE = re.compile(r"^(\d+)")
 # Bayt satırı: `        af fe 0d fe d8 bf 7b 87              ......{.`
 BYTES_RE = re.compile(r"^\s{4,}((?:[0-9a-f]{2} ){7}[0-9a-f]{2})\b")
+# LE olayları `LE Meta Event (0x3e)` başlığı altında gelir ve GERÇEK ad bir
+# SONRAKİ satırdadır, 6 boşluk girintiyle: `      LE Read Remote Used Features
+# (0x04)`. Alan satırları 8 boşlukta. Ölçüldü (2026-09-04) — bu yapı
+# tanınmadığı için LE bağlantıları yakalamada görünmüyordu.
+LE_META_RE = re.compile(r"^\s{4,8}(LE [A-Za-z0-9 #-]+?)\s+\(0x[0-9a-f]+\)\s*$")
+LE_FEATURES_EVENT = re.compile(r"^LE Read Remote Used Features")
+# LE bağlantı olayında adres alanının adı `Address` değil `Peer address`.
+PEER_ADDRESS_RE = re.compile(r"[Pp]eer address:\s*([0-9A-Fa-f:]{17})")
+# Blok sonlandırıcı: sütun 0'dan başlayan her satır önceki HCI olayını
+# **bitirir**. Olmazsa araya giren MGMT satırları önceki olayın alanları gibi
+# okunur ve `LE Address:` taşıdıkları için hayalet kayıt üretirler — ölçüldü
+# (2026-09-04): gerçek bir yakalamada adaptörün kendi adresi dahil dört adres
+# çıktı, dördü de alansız.
+BLOCK_END_RE = re.compile(r"^\S")
 # `        Features[0/0][8]:` — bu satır `FIELD_RE`ye TAKILMAZ (adında köşeli
 # parantez ve rakam var), o yüzden ayrı işaretçi. Bir kez yanlış yazıldı ve
 # sessizce boş sonuç verdi: adres çözülüyordu, özellikler hiç toplanmıyordu.
@@ -102,23 +120,45 @@ def parse(text):
         address = by_handle.get(handle)
         if not address:
             return
-        entry = out.setdefault(address, {})
+        # Veri yoksa kayıt AÇILMAZ: adres taşıyan her olay (bağlantı, kopma…)
+        # boş bir satır üretirdi ve rapor "cihaz bulundu, alan yok" diye
+        # okunurdu — oysa o cihaz hiç sorgulanmamış olabilir.
+        found = {}
         if FEATURES_EVENT.match(event) and "features" in fields:
             # HCI baytları LSB'den gelir; Windows QWORD'ü little-endian
             # saklıyor (ÖLÇÜLDÜ, Soundcore: birebir eşleşti).
-            entry["lmp_features"] = int.from_bytes(fields["features"], "little")
+            found["lmp_features"] = int.from_bytes(fields["features"], "little")
+        elif LE_FEATURES_EVENT.match(event) and "features" in fields:
+            # LE özellik maskesi AYRI anahtarda tutuluyor ve Windows alanlarına
+            # EŞLENMİYOR: farenin `Devices\<mac>` kaydında `LMPFeatures` alanı
+            # hiç YOK (ölçüldü), yani onu oraya yazmak uydurma olurdu. Kayda
+            # geçiyor çünkü bedava ve LE tarafını anlamaya yarar.
+            found["le_features"] = int.from_bytes(fields["features"], "little")
         elif VERSION_EVENT.match(event):
             for key, name in (("lmp_version", "Version"),
                               ("manufacturer", "Manufacturer"),
                               ("lmp_subversion", "Subversion")):
                 if name in fields:
-                    entry[key] = _num(fields[name])
+                    found[key] = _num(fields[name])
+        if found:
+            out.setdefault(address, {}).update(found)
 
     for line in text.splitlines():
         header = EVENT_RE.match(line)
         if header:
             flush()
             event, fields, handle = header.group(1).strip(), {}, None
+            continue
+        # `LE Meta Event` başlığından hemen sonraki satır gerçek alt olay adı;
+        # başlıktaki ad her LE olayı için aynı olduğundan tek başına işe yaramaz.
+        if event and event.startswith("LE Meta"):
+            sub = LE_META_RE.match(line)
+            if sub:
+                event = sub.group(1).strip()
+                continue
+        if BLOCK_END_RE.match(line):
+            flush()
+            event, fields, handle = None, {}, None
             continue
         if event is None:
             continue
@@ -139,7 +179,7 @@ def parse(text):
         if name == "Handle":
             digits = HANDLE_RE.match(value)
             handle = int(digits.group(1)) if digits else None
-        address = ADDRESS_RE.search(line)
+        address = ADDRESS_RE.search(line) or PEER_ADDRESS_RE.search(line)
         if address and handle is not None:
             by_handle[handle] = address.group(1).upper()
 
@@ -156,14 +196,18 @@ class Capture:
     ayrıca sarıyor — yakalama unutulursa kendiliğinden biter.
     """
 
-    def __init__(self, path, limit_seconds=180):
+    def __init__(self, path, limit_seconds=180, keep_log=False):
         self.path = path
         self.limit = limit_seconds
+        self.keep_log = keep_log
         self.proc = None
         self.handle = None
 
     def start(self):
-        self.handle = open(self.path, "w", encoding="utf-8", errors="replace")
+        # 0600: log bond anahtarlarını içeriyor (yukarıda ölçüldü). Varsayılan
+        # umask altında 0644 açılırdı.
+        fd = os.open(self.path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        self.handle = os.fdopen(fd, "w", encoding="utf-8", errors="replace")
         self.proc = subprocess.Popen(
             ["timeout", str(self.limit), "btmon"],
             stdout=self.handle, stderr=subprocess.STDOUT, start_new_session=True)
@@ -191,7 +235,10 @@ class Capture:
         if self.handle:
             self.handle.close()
         with open(self.path, encoding="utf-8", errors="replace") as handle:
-            return handle.read()
+            text = handle.read()
+        if not self.keep_log:
+            os.unlink(self.path)
+        return text
 
 
 def summary(parsed):
@@ -201,14 +248,21 @@ def summary(parsed):
                 "(sonda: log'un başında `Connect Complete` var mı)."]
     lines = []
     for address, entry in sorted(parsed.items()):
-        got = ", ".join(f"{win}={entry[key]}" for win, key in WINDOWS_FIELDS.items()
-                        if key in entry)
+        got = [f"{win}={entry[key]}" for win, key in WINDOWS_FIELDS.items()
+               if key in entry]
+        # Windows'a EŞLENMEYEN ama toplanan alanlar da yazılır, yoksa dolu bir
+        # yakalama "(alan yok)" diye görünür ve boş bir turdan ayırt edilemez.
+        extra = [f"{key}={value}" for key, value in sorted(entry.items())
+                 if key not in WINDOWS_FIELDS.values()]
+        lines.append(f"  {address}  {', '.join(got + extra) or '(alan yok)'}")
         missing = [win for win, key in WINDOWS_FIELDS.items() if key not in entry]
-        lines.append(f"  {address}  {got or '(alan yok)'}")
         if missing:
-            lines.append(f"{'':<21}eksik: {', '.join(missing)}"
-                         + ("  — sürüm olayı ateşlemedi (çekirdek koşulsuz istemiyor)"
-                            if "LmpVersion" in missing else ""))
+            note = ""
+            if "LmpVersion" in missing:
+                note = ("  — sürüm olayı ateşlemedi; bu çekirdekte "
+                        "`Read Remote Version Information` yeniden bağlanmada "
+                        "koşulsuz istenmiyor (ölçüldü, BR/EDR ve LE)")
+            lines.append(f"{'':<21}Windows alanı eksik: {', '.join(missing)}{note}")
     return lines
 
 

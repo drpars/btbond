@@ -27,11 +27,12 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import bluezbond  # noqa: E402
 import winbond  # noqa: E402
+import agentexec  # noqa: E402
 from agentexec import run_powershell  # noqa: E402
 
 # Bu makinenin radyosu; başka makinede değişir, o yüzden CLI'dan geçilebiliyor.
 DEFAULT_USB_ID = "8087:0032"
-DEFAULT_DOMAIN = "win11-nvme"
+DEFAULT_DOMAIN = agentexec.DEFAULT_DOMAIN
 
 # `/sys/class/bluetooth` yalnız adaptörü değil BAĞLANTI düğümlerini de
 # listeliyor (ölçüldü: `hci0 hci0:256 hci0:2048`), yani "dizin boş mu"

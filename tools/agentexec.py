@@ -17,6 +17,11 @@ import time
 LIBVIRT_URI = "qemu:///system"
 AGENT_TIMEOUT = 90
 
+# Bu makinenin misafiri. Varsayilanin TEK sahibi burasi: uc ayri dosyada
+# ayni dize yaziliydi ve makine degisince ikisi gozden kacardi -- bir
+# olgunun tek sahibi olur, ve "domain" tam olarak kanalin olgusu.
+DEFAULT_DOMAIN = "win11-nvme"
+
 
 def agent_command(domain, payload, uri=LIBVIRT_URI):
     """Ajana bir QMP komutu gönder, `return` gövdesini döndür."""

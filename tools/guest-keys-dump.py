@@ -21,6 +21,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import agentexec  # noqa: E402
 from agentexec import run_powershell  # noqa: E402
 
 BTHPORT = r"HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Keys"
@@ -61,7 +62,7 @@ Get-PnpDevice -ErrorAction SilentlyContinue |
 
 
 def main():
-    domain = sys.argv[1] if len(sys.argv) > 1 else "win11-nvme"
+    domain = sys.argv[1] if len(sys.argv) > 1 else agentexec.DEFAULT_DOMAIN
     exitcode, stdout, stderr = run_powershell(domain, POWERSHELL)
 
     for label, data in (("stdout", stdout), ("stderr", stderr)):

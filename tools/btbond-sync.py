@@ -21,6 +21,7 @@ Kullanım:
     tools/btbond-sync.py status --json
     sudo tools/btbond-sync.py sync --dry-run
     sudo tools/btbond-sync.py sync --direction to-host --handover
+    sudo tools/btbond-sync.py handover --to host --capture-hci
 """
 
 import argparse
@@ -28,6 +29,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -104,6 +106,23 @@ def state_path(name):
     return Path(base) / "btbond" / name
 
 
+def give_back(path):
+    """`sudo` altında oluşturulan yolu çağıran kullanıcıya devret.
+
+    ÖLÇÜLDÜ (2026-09-04): yol kullanıcının evine çözülüyor ama `mkdir`/`open`
+    root koştuğu için dizin de dosya da **root'un** oluyordu
+    (`drwxr-xr-x root root`) — kullanıcı kendi durum dizinini yönetemiyor,
+    silemiyor. Yol doğru, sahiplik yanlıştı.
+    """
+    uid, gid = os.environ.get("SUDO_UID"), os.environ.get("SUDO_GID")
+    if uid is None or gid is None:
+        return
+    try:
+        os.chown(path, int(uid), int(gid))
+    except OSError:
+        pass
+
+
 def capture_target(direction):
     """HCI yakalaması yalnız radyo **host'a** gelirken anlamlı.
 
@@ -113,7 +132,36 @@ def capture_target(direction):
     return direction == "to-host"
 
 
-def handover(direction, domain, usb_id, dry_run, capture_to=None, settle=25):
+def bonded_devices(root):
+    """Host'ta bond'u olan cihaz MAC'leri — yakalama sırasında bağlanacaklar."""
+    devices = []
+    for adapter in bluezbond.list_adapters(root):
+        devices += sorted(bluezbond.list_bonds(root, adapter))
+    return devices
+
+
+def provoke(devices, deadline):
+    """Bond'lu cihazlara bağlanmayı dene, olaylar ateşlesin diye.
+
+    ÖLÇÜLDÜ (2026-09-04): devirden sonra yalnız beklemek YETMİYOR — 40 sn'lik
+    pencerede hiçbir cihaz kendiliğinden bağlanmadı ve yakalama boş döndü.
+    Uzak sürüm/özellik olayları bağlantı KURULURKEN geçtiği için, bağlantı yoksa
+    öğrenilecek bir şey de yok. Kapalı ya da menzil dışı cihazda deneme
+    zararsızca düşer.
+    """
+    for dev in devices:
+        if time.time() >= deadline:
+            print(f"  [hci] süre doldu, kalan cihazlar denenmedi")
+            return
+        result = subprocess.run(["bluetoothctl", "connect", dev],
+                                capture_output=True, text=True, timeout=25)
+        state = "bağlandı" if result.returncode == 0 else "bağlanmadı"
+        print(f"  [hci] {dev}: {state}")
+        sys.stdout.flush()
+
+
+def handover(direction, domain, usb_id, dry_run, capture_to=None, settle=25,
+             root=bluezbond.ROOT, keep_log=False):
     """Radyoyu hedef tarafa geçir — yazımdan SONRA, çünkü hedef onu okurken alır.
 
     `capture_to` verilirse devir **btmon yakalamasının içinde** koşar: adaptör
@@ -132,17 +180,25 @@ def handover(direction, domain, usb_id, dry_run, capture_to=None, settle=25):
     capture = None
     if capture_to:
         capture_to.parent.mkdir(parents=True, exist_ok=True)
+        give_back(capture_to.parent)
         log = capture_to.with_suffix(".btmon.log")
-        print(f"  [hci] yakalama başladı → {log}")
-        capture = hcicapture.Capture(str(log), limit_seconds=settle + 60).start()
+        print(f"  [hci] yakalama başladı → {log}"
+              + ("" if keep_log else " (ayrıştırmadan sonra silinir: anahtar taşıyor)"))
+        capture = hcicapture.Capture(str(log), limit_seconds=settle + 90,
+                                     keep_log=keep_log).start()
 
     sys.stdout.flush()
     code = subprocess.run(cmd, timeout=300).returncode
 
     if capture:
-        print(f"  [hci] cihazların bağlanması için {settle} sn bekleniyor…")
+        deadline = time.time() + settle
+        print(f"  [hci] adaptörün kurulması bekleniyor, sonra bond'lu cihazlar "
+              f"tetiklenecek ({settle} sn bütçe)…")
         sys.stdout.flush()
-        parsed = hcicapture.parse(capture.stop(settle_seconds=settle))
+        time.sleep(min(8, settle))
+        provoke(bonded_devices(root), deadline)
+        remaining = max(0, int(deadline - time.time()))
+        parsed = hcicapture.parse(capture.stop(settle_seconds=remaining))
         print("  [hci] toplanan uzak cihaz bilgisi:")
         for line in hcicapture.summary(parsed):
             print("  " + line)
@@ -153,6 +209,7 @@ def handover(direction, domain, usb_id, dry_run, capture_to=None, settle=25):
             merged.setdefault(address, {}).update(hcicapture.to_windows_fields(entry))
         capture_to.write_text(json.dumps(merged, indent=2, sort_keys=True),
                               encoding="utf-8")
+        give_back(capture_to)
         print(f"  [hci] kaydedildi → {capture_to}")
     return code
 
@@ -220,18 +277,21 @@ def run_sync(args, state):
                 print("  [hci] bu yönde yakalama atlandı: radyo host'tan ÇIKIYOR, "
                       "cihazlar misafirin içinde bağlanır ve host hiçbir olay görmez.")
             exit_code = exit_code or handover(direction, args.domain, args.usb_id,
-                                              args.dry_run, capture_to, args.settle)
+                                              args.dry_run, capture_to, args.settle,
+                                              args.root, args.keep_hci_log)
     return exit_code
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("command", choices=("status", "sync"))
+    parser.add_argument("command", choices=("status", "sync", "handover"))
     parser.add_argument("--domain", default=bondsync.DEFAULT_DOMAIN)
     parser.add_argument("--root", default=bluezbond.ROOT)
     parser.add_argument("--usb-id", default=bondsync.DEFAULT_USB_ID)
     parser.add_argument("--direction", choices=("to-host", "to-guest"),
                         help="yalnız bu yöndeki satırları uygula (varsayılan: ikisi de)")
+    parser.add_argument("--to", choices=("host", "guest"), dest="to_side",
+                        help="`handover` komutu: radyonun gideceği taraf")
     parser.add_argument("--handover", action="store_true",
                         help="yazımdan sonra radyoyu hedef tarafa geçir (vfioctl)")
     # Çıplak `--capture-hci` nöbetçi verir, `main` onu varsayılan yola çevirir.
@@ -242,6 +302,8 @@ def main():
                         help="devir sırasında btmon ile uzak cihaz bilgisi topla "
                              "(yalnız --handover ve radyo host'a gelirken); "
                              "varsayılan hedef $XDG_STATE_HOME/btbond/remote-info.json")
+    parser.add_argument("--keep-hci-log", action="store_true",
+                        help="ham btmon log'unu silme (DİKKAT: bond anahtarları içerir)")
     parser.add_argument("--settle", type=int, default=25, metavar="SN",
                         help="devirden sonra cihazların bağlanması için beklenecek süre")
     parser.add_argument("--force", action="store_true",
@@ -252,9 +314,26 @@ def main():
     args = parser.parse_args()
     if args.capture_hci == Path(CAPTURE_DEFAULT):
         args.capture_hci = state_path("remote-info.json")
-    if args.capture_hci and not args.handover:
-        parser.error("--capture-hci yalnız --handover ile anlamlı: olaylar "
-                     "radyo host'a gelirken, adaptör kurulurken geçiyor")
+    if args.capture_hci and not (args.handover or args.command == "handover"):
+        parser.error("--capture-hci yalnız devirle anlamlı (`handover` komutu ya da "
+                     "`sync --handover`): olaylar radyo host'a gelirken, adaptör "
+                     "kurulurken geçiyor")
+
+    if args.command == "handover":
+        # Devir tek basina: yazilacak bir sey OLMASA da radyoyu tasimak ve
+        # yakalamak gerekebiliyor. `sync --handover` yakalamayi ancak bir
+        # yazim varken calistirir; bu komut o bagi cozuyor.
+        if not args.to_side:
+            parser.error("`handover` için --to host|guest gerekir")
+        if os.geteuid() != 0 and args.capture_hci and not args.dry_run:
+            sys.exit("--capture-hci root ister (btmon monitör soketi)")
+        direction = "to-host" if args.to_side == "host" else "to-guest"
+        capture_to = args.capture_hci if capture_target(direction) else None
+        if args.capture_hci and not capture_to:
+            print("  [hci] bu yönde yakalama atlandı: radyo host'tan ÇIKIYOR, "
+                  "cihazlar misafirin içinde bağlanır ve host hiçbir olay görmez.")
+        return handover(direction, args.domain, args.usb_id, args.dry_run,
+                        capture_to, args.settle, args.root, args.keep_hci_log)
 
     try:
         state = bondsync.survey(args.domain, args.root, args.usb_id)
