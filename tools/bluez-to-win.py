@@ -291,4 +291,8 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    # Ajan hatasını mesaja çeviren yer → `win-to-bluez.py`deki aynı yorum.
+    try:
+        main()
+    except agentexec.AgentError as exc:
+        sys.exit(str(exc))

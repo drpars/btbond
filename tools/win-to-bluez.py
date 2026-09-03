@@ -182,4 +182,10 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    # Ajan hatasını MESAJA çeviren yer burası: `agentexec` artık `sys.exit`
+    # çağırmıyor (kütüphane çağıranın kararına karışmaz), o yüzden tek satır
+    # hata metnini çalıştırılabilir basar — yoksa traceback'e dönerdi.
+    try:
+        main()
+    except agentexec.AgentError as exc:
+        sys.exit(str(exc))

@@ -65,6 +65,22 @@ VERDICT_DIRECTION = {
 }
 
 
+def other_domains(domain, uri="qemu:///system"):
+    """`domain` dışında TANIMLI domain adları; ölçülemezse `None`.
+
+    Yalnız kapsam cümlesi için: bu adların Windows olup olmadığı, hatta
+    koşup koşmadığı burada sorulmuyor — sorulan şey "kaç taraf daha var".
+    """
+    try:
+        proc = subprocess.run(["virsh", "-c", uri, "list", "--all", "--name"],
+                              capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if proc.returncode != 0:
+        return None
+    return sorted(n for n in proc.stdout.split() if n and n != domain)
+
+
 def radio_where(domain=DEFAULT_DOMAIN, usb_id=DEFAULT_USB_ID):
     """Radyo nerede? **İki bağımsız kanal**, ikisi de ayrı ayrı raporlanır.
 
@@ -74,8 +90,19 @@ def radio_where(domain=DEFAULT_DOMAIN, usb_id=DEFAULT_USB_ID):
 
     İki kanal çelişirse bu **bildirilir**, biri seçilmez: "host'ta yok"
     tek başına "misafirde" demek değil — radyo hiçbir tarafta bağlı
-    olmayabilir. Döner: `{"host": bool, "guest": bool|None, "where": str}`
-    — `guest` yalnız libvirt okunamadığında `None`.
+    olmayabilir.
+
+    KAPSAM (2026-09-04): misafir kanalı **yalnız adı verilen domain'i** okur,
+    ve bu makinede üç Windows domain'i tanımlı. O yüzden olumsuz cevap
+    kapsamını taşımak zorunda: eskiden "hiçbir tarafta bağlı değil" deniyordu
+    ve bu, radyo BAŞKA bir domain'de iken de basılan bir cümleydi. Tek domain
+    varken doğruydu — yanlışa dönmesi için ikinci bir domain'in radyoyu
+    almasını beklemek yetiyordu. Kapsam kayıtla değil **ölçülerek** yazılıyor:
+    sorulmayan domain sayısı sayılabiliyor, ve sıfırsa olumsuz gerçekten tam.
+
+    Döner: `{"host": bool, "guest": bool|None, "others": list|None,
+    "where": str}` — `guest` yalnız libvirt okunamadığında `None`, `others`
+    domain listesi ölçülemediğinde `None`.
     """
     host = any(HCI_RE.match(p.name) for p in Path("/sys/class/bluetooth").glob("*")) \
         if Path("/sys/class/bluetooth").is_dir() else False
@@ -91,17 +118,31 @@ def radio_where(domain=DEFAULT_DOMAIN, usb_id=DEFAULT_USB_ID):
     except (OSError, subprocess.SubprocessError):
         guest = None
 
+    # Kapsam yalnız OLUMSUZ dalda ölçülüyor: radyonun yeri bulunduysa
+    # sorulmayan tarafların sayısı hükmü değiştirmiyor, ve `virsh list`
+    # bedava değil.
+    others = None
+    if not host and guest is False:
+        others = other_domains(domain)
+
     if host and guest:
         where = "ÇELİŞKİ (iki kanal da 'burada' diyor)"
     elif host:
         where = "host"
     elif guest:
-        where = "guest"
+        where = f"misafir ({domain})"
     elif guest is None:
-        where = "host'ta değil (misafir kanalı okunamadı)"
+        where = f"host'ta değil; misafir ({domain}) kanalı OKUNAMADI"
+    elif others is None:
+        where = (f"host'ta değil, {domain}'de değil — başka domain tanımlı mı "
+                 f"ÖLÇÜLEMEDİ")
+    elif not others:
+        where = (f"hiçbir tarafta bağlı değil (host + {domain} soruldu; "
+                 f"başka domain tanımlı değil)")
     else:
-        where = "hiçbir tarafta bağlı değil"
-    return {"host": host, "guest": guest, "where": where}
+        where = (f"host'ta değil, {domain}'de değil — SORULMAYAN "
+                 f"{len(others)} domain daha tanımlı: {', '.join(others)}")
+    return {"host": host, "guest": guest, "others": others, "where": where}
 
 
 def _host_state(root, adapter):
@@ -130,8 +171,14 @@ def _host_state(root, adapter):
     return out
 
 
-def _guest_state(entry, names):
-    """Misafirin bond'larını host'la aynı biçime çevir."""
+def guest_state(entry, names):
+    """Misafirin bond'larını host'la aynı biçime çevir.
+
+    **Açık (2026-09-04):** taşıyıcıdan bağımsız — girdisi `winbond.collect`
+    çıktısı, yani anahtarların ajandan mı offline kovandan mı geldiği burada
+    sorulmuyor. `hivebond` bunu çağırıyor; ikinci bir kopya yazılsaydı
+    biri ilerler, öbürü donardı.
+    """
     out = {}
     for dev, link_key in entry["bredr"].items():
         out[dev] = {"name": names.get(dev, dev), "tech": "BR/EDR",
@@ -196,7 +243,7 @@ def survey(domain=DEFAULT_DOMAIN, root=bluezbond.ROOT, usb_id=DEFAULT_USB_ID):
 
     adapter = common[0]
     host = _host_state(root, adapter)
-    guest = _guest_state(adapters[adapter], names)
+    guest = guest_state(adapters[adapter], names)
 
     for dev in sorted(set(host) | set(guest)):
         host_row, guest_row = host.get(dev), guest.get(dev)

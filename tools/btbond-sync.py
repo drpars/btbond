@@ -64,9 +64,13 @@ def render(state):
     radio = state["radio"]
     lines = [
         f"domain {state['domain']}  |  adaptör {state['adapter'] or '(kesişim yok)'}",
+        # Misafir sütunu HANGİ domain'i konuştuğunu söylüyor: tek domain
+        # varsayan bir okuyucu, radyo başka bir domain'deyken basılan
+        # `misafir=hayır`ı "radyo hiçbir misafirde değil" diye okur.
         f"radyo: {radio['where']}  "
         f"(host={'evet' if radio['host'] else 'hayır'}, "
-        f"misafir={'okunamadı' if radio['guest'] is None else ('evet' if radio['guest'] else 'hayır')})",
+        f"misafir[{state['domain']}]="
+        f"{'okunamadı' if radio['guest'] is None else ('evet' if radio['guest'] else 'hayır')})",
         "",
     ]
     for warning in state["warnings"]:
@@ -240,6 +244,15 @@ def run_sync(args, state):
         print(f"=== {DIRECTION_ARROW[direction]}  ({len(picked)} cihaz) ===")
 
         # KAPI: hedef taraf radyoyu tutuyorsa yazma etkisiz kalır.
+        #
+        # ÇOKLU DOMAIN'DE DE DOĞRU, ve bu tesadüf değil: kapının sorduğu şey
+        # "radyo nerede" değil, "**hedef** onu tutuyor mu". Misafir kanalı
+        # yalnız adı verilen domain'in XML'ini okuduğu için ölçü tam o soruyu
+        # cevaplıyor — radyo ÜÇÜNCÜ bir domain'de olsa `guest=False` doğrudur,
+        # çünkü hedef Windows'un `BTHPORT` sürücüsü koşmuyor ve yazım o taraf
+        # radyoyu aldığında okunacak. Buradaki `radio[side]`i "radyonun yeri"
+        # sanıp düzeltmeye kalkmayın; düzeltilmesi gereken yer `where`
+        # dizesinin KAPSAMI idi ve o ayrıca yazıldı (`bondsync.radio_where`).
         if here:
             print(f"  DURDU: hedef ({side}) radyoyu tutuyor. Bu sırada yazmak hata "
                   f"vermez, sessizce etkisiz kalır — önce radyo öbür tarafa alınır.")

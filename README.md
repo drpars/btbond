@@ -39,20 +39,33 @@ Bu iki kurulumda da aynı problemdir:
 
 ## Neden bu şekilde: kanal seçimi
 
-Yaygın reçete Windows bölümünü host'tan mount edip `SYSTEM` kovanını `chntpw`
-ile açmaktır. Bu araç **bunu yapmıyor**, çünkü passthrough kurulumunda o yol
-tanımı gereği tıkalı: misafirin diski `vfio-pci`'ye bağlıysa host'ta blok
-aygıtı olarak **yoktur**, ve üstüne BitLocker gelirse ikinci bir katman daha
-eklenir.
+**İki kanal var, ve genel olan offline kovan.** Bond, misafirin diskindeki bir
+dosyada duruyor (`Windows/System32/config/SYSTEM`), yani onu okumak için
+Windows'un koşması **gerekmiyor**. Dual boot bunun kanıtı: orada Windows,
+Linux'la aynı anda hiç koşamaz — replikasyon koşan Windows gerektirseydi dual
+boot prensipte imkânsız olurdu.
 
-Bunun yerine **`qemu-guest-agent`** kullanılıyor. Ajan misafirde
+**`qemu-guest-agent`** (`agentexec.py`) koşan misafir için. Ajan misafirde
 `NT AUTHORITY\SYSTEM` olarak koşar, ve `HKLM\SYSTEM\CurrentControlSet\Services\
-BTHPORT\Parameters\Keys` tam olarak SYSTEM'e açık bir anahtardır. Sonuç:
-misafiri **kapatmadan**, diski **rebind etmeden**, şifrelemeye **hiç
-dokunmadan** okunup yazılabiliyor.
+BTHPORT\Parameters` tam olarak SYSTEM'e açık bir anahtardır. Sonuç: misafiri
+**kapatmadan**, diski **rebind etmeden**, şifrelemeye **hiç dokunmadan**
+okunup yazılabiliyor. Bugün yazma yolu **yalnız** bunda var.
 
-Dual boot kurulumunda ajan yoktur; orada offline kovan yolu doğru yoldur ve
-ayrı bir arka uç olarak eklenecek.
+**Offline kovan** (`hivebond.py`) kapalı misafir ve dual boot için —
+şu an **salt-okuma**. Zincir: domain kapalı → disk host'ta → bölüm mount →
+`hivex` → `ControlSet00N\Services\BTHPORT\Parameters`.
+
+Ajanın tek gerçek üstünlüğü **diske erişmek zorunda olmaması** — hız değil,
+çünkü koşan Windows'a yazılan anahtar da ancak `BTHPORT` sürücüsü başlarken
+okunuyor. Ajanı *zorunlu* kılan üç durum var: (a) misafiri kapatmak
+istememek, (b) birim şifreli ve anahtar elde değil, (c) disk host'a hiç
+dönmüyor (`managed='no'` + boot'ta vfio'ya bağlanmış disk). **Passthrough tek
+başına bunlardan biri değil:** `managed='yes'` bir disk kapanışta host'a geri
+döner, ve bir qcow2 imajı ayrılmış diskten daha da kolay erişilir.
+
+Offline kanalın bir üstünlüğü de var: **yazma sırası kapısı bedava**. Kapalı bir
+Windows radyoyu tutamaz, yani "hedef tarafta radyo yokken yaz" kuralı tanımı
+gereği sağlanır.
 
 ## Ölçülmüş düzen
 
@@ -141,8 +154,11 @@ vfioctl guest --name <domain> usb --detach <vendor>:<product>
 ## Gereksinimler
 
 - **Host:** Python 3.11+, `bluez`, `libvirt` (`virsh`)
-- **Misafir:** `qemu-guest-agent` kurulu ve yanıt veriyor
-- Bond'ları okumak/yazmak root gerektirir (`/var/lib/bluetooth` 0700)
+- **Misafir (ajan kanalı):** `qemu-guest-agent` kurulu ve yanıt veriyor
+- **Offline kanal:** `hivex` (Python bağlamasıyla), NTFS sürücüsü (`ntfs3`
+  çekirdekte yeter, `ntfs-3g` gerekmez); imaj dosyası için ayrıca `qemu-nbd`
+- Bond'ları okumak/yazmak root gerektirir (`/var/lib/bluetooth` 0700; kovan
+  için mount)
 
 ## Kullanım
 
@@ -230,6 +246,29 @@ sudo tools/win-to-bluez.py --verify
 tools/guest-keys-dump.py [domain]      # varsayılan: win11-nvme
 ```
 
+**Kapalı misafir / dual boot — offline kovan** (`hivebond.py`, salt-okuma).
+Misafir **kapalı** olmalı; disk host'ta blok aygıtı olarak görünmeli.
+
+```
+# doğrudan bir bölüm (dual boot, ya da kapalı passthrough disk)
+sudo mount -t ntfs3 -o ro /dev/<bölüm> /mnt/win
+sudo tools/hivebond.py /mnt/win                 # mount kökünü verin, kovanı bulur
+sudo tools/hivebond.py /mnt/win --dump          # ham satırlar (ajanla aynı biçim)
+
+# imaj dosyası (kapalı bir domain'in qcow2'si)
+sudo modprobe nbd max_part=8
+sudo qemu-nbd --read-only --connect=/dev/nbd0 <imaj>.qcow2
+sudo partprobe /dev/nbd0                        # ZORUNLU: aksi hâlde lsblk 0B gösterir
+sudo mount -t ntfs3 -o ro /dev/nbd0p<N> /mnt/win
+...
+sudo umount /mnt/win && sudo qemu-nbd --disconnect /dev/nbd0
+```
+
+Windows kurulumunu bulmanın ölçütü **"NTFS mi" DEĞİL** — sonda okunacak
+dosyanın kendisi (`Windows/System32/config/SYSTEM`). Bir kurtarma bölümü de
+NTFS'tir ve araç onu reddeder. `CurrentControlSet` offline kovanda **yoktur**;
+gerçek set `Select\Current`ten çözülür.
+
 ## Güvenlik
 
 Bu deponun konusu tanımı gereği sırdır: `LinkKey`, `LTK`, `IRK`, `CSRK`. Bir
@@ -265,7 +304,12 @@ MIT → [LICENSE](LICENSE).
 - [x] Tek komutluk akış (`btbond-sync.py status` / `sync`) — yön satırın
       özelliği, yazma sırası kapı olarak uygulanıyor
 - [ ] TUI
-- [ ] Dual boot (offline kovan) arka ucu
+- [x] Offline kovan **okuma** arka ucu (`hivebond.py`) — kapalı misafir ve
+      dual boot; iki taraflı doğrulandı (altı parmak izi ajanla birebir aynı),
+      bölüm ve qcow2 kolları ayrı ayrı koştu
+- [ ] Offline kovan **yazma** — önce hızlı başlatma / `hiberfil` denetimi
+- [ ] Çoklu taraf: `--domain` tekrarlanabilir olsun, kapsam kullanıcının
+      seçimi olsun, ve `collect` + `distribute` iki fazlı akış
 
 ## Bilinen boşluk
 
