@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# gitleaks pre-commit — staged içerikte sır ararsa commit'i durdurur.
+#
+# Bu depo tanımı gereği eşleşme anahtarlarıyla uğraşıyor, yani kaza ile bir
+# LinkKey/LTK commit'lemek gerçek bir risk. Kanca o yüzden burada opsiyonel
+# değil.
+#
+# Bu dosya depodadır ve klonlanır; .git/hooks'a KOPYALANMAZ. Bağlantıyı kuran
+# ayar depoya özeldir ve klonlanmaz — yeni klonda bir kez:
+#     git config core.hooksPath .githooks
+#
+# gitleaks 8.19'da `protect` yerine `git --staged` geldi ama `protect` hâlâ
+# duruyor. Hangi sürümün kurulu olduğu betik yazılırken bilinmiyordu, o yüzden
+# alt komut çalışma anında seçiliyor.
+
+set -uo pipefail
+
+if ! command -v gitleaks >/dev/null 2>&1; then
+    printf '\033[1;31mpre-commit: gitleaks kurulu değil, commit durduruldu.\033[0m\n'
+    printf 'Kur:  sudo pacman -S gitleaks\n'
+    printf 'Atla: git commit --no-verify   (yalnızca ne yaptığını biliyorsan)\n'
+    exit 1
+fi
+
+if gitleaks protect --help >/dev/null 2>&1; then
+    gitleaks protect --staged --redact --verbose
+else
+    gitleaks git --staged --redact --verbose .
+fi
+DURUM=$?
+
+if [[ $DURUM -ne 0 ]]; then
+    printf '\n\033[1;31mpre-commit: gitleaks bulgu verdi, commit durduruldu.\033[0m\n'
+    printf 'Yanlış alarmsa .gitleaksignore dosyasına parmak izini ekle.\n'
+    exit 1
+fi
+
+exit 0

@@ -1,0 +1,37 @@
+# Bond dumps carry real key material (LinkKey, LTK, IRK, CSRK). The tool writes
+# them under these names; none of them is ever a commit. This is the single
+# most important line in this file -- the repo's whole subject matter is secret
+# by nature.
+*.bond
+*.bonds
+bonds/
+dump-*.json
+*-keys.json
+*-keys.txt
+
+# Registry exports, in case someone reaches for reg.exe /y by hand.
+*.reg
+*.hiv
+SYSTEM
+SYSTEM.*
+
+# BlueZ state copied out for inspection.
+info
+var-lib-bluetooth/
+
+# Extensions that can hold secrets. Nothing matches today; accident insurance.
+*.env
+*.key
+*.pem
+*.p12
+*.pfx
+
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+.venv/
+
+# Editor / OS
+*.swp
+.DS_Store
