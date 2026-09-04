@@ -393,23 +393,87 @@ def name_blob(name):
     return (name.encode("utf-8") + b"\x00").hex()
 
 
-def bredr_script(adapter, dev, link_key_hex):
-    """Bir BR/EDR bond'unun ANAHTARINI yazan PowerShell parçası.
+# --- Ara temsil (IR) ve renderer'lar --------------------------------------
+#
+# NEDEN: emitörler eskiden doğrudan PowerShell **metni** üretiyordu, yani
+# düzen (hangi anahtar, hangi değer, hangi tip) ile taşıyıcı (PowerShell'in
+# sözdizimi) aynı f-string'de duruyordu. Offline kovan yazma yolu eklenince
+# aynı düzen hivex çağrıları olarak **ikinci kez** yazılacaktı ve bu deponun
+# kuralına göre biri ilerler, öbürü donardı.
+#
+# Bu yüzden emitörler artık `*_ops` — yazma **işlemleri** listesi üretiyorlar
+# —, ve taşıyıcılar aptal renderer'lar. Düzenin tek sahibi hâlâ bu modül;
+# `hivebond` okuma tarafında zaten aynı ayrımı kullanıyor.
+#
+# İşlem biçimi: `(tip, *argümanlar)`. Değer hex dizesi olarak taşınıyor
+# (BlueZ'in `info` dosyası da hex veriyor); hivex renderer'ı `bytes.fromhex`
+# ile çevirir.
+KEY = "key"                # (KEY, yol)                  -> anahtarı var et
+BIN = "bin"                # (BIN, yol, ad, hex)         -> REG_BINARY
+DW = "dw"                  # (DW, yol, ad, int)          -> REG_DWORD (işaretsiz)
+QW = "qw"                  # (QW, yol, ad, int)          -> REG_QWORD (işaretsiz)
+STR = "str"                # (STR, yol, ad, dize)        -> REG_SZ
+ZEROS = "zeros"            # (ZEROS, yol, ad, uzunluk)   -> N baytlık sıfır
+ECHO = "echo"              # (ECHO, metin)               -> ilerleme işareti
+DEL_KEY = "del_key"        # (DEL_KEY, yol)              -> anahtar ağacını sil
+DEL_VALUE = "del_value"    # (DEL_VALUE, yol, ad)        -> tek değeri sil
 
-    Cihaz kaydı ayrı: → `device_record_script`. Yalnız bu parça yazılırsa
+# Sıfır tamponunun uzunluk olarak taşınması bilinçli: hex olarak gönderilse
+# `-EncodedCommand` Windows'un komut satırı sınırını aşıyor (→ WRITE_PRELUDE).
+_POWERSHELL = {
+    KEY: lambda p: f"Ensure-Key '{p}'",
+    BIN: lambda p, n, v: f"Set-Bin '{p}' '{n}' '{v}'",
+    DW: lambda p, n, v: f"Set-Dw '{p}' '{n}' {v}",
+    QW: lambda p, n, v: f"Set-Qw '{p}' '{n}' {v}",
+    STR: lambda p, n, v: f"Set-Str '{p}' '{n}' '{v}'",
+    ZEROS: lambda p, n, v: f"Set-Zeros '{p}' '{n}' {v}",
+    ECHO: lambda t: f"'{t}'",
+    DEL_KEY: lambda p: (f"Remove-Item -LiteralPath '{p}' -Recurse -Force "
+                        f"-ErrorAction SilentlyContinue"),
+    DEL_VALUE: lambda p, n: (f"Remove-ItemProperty -LiteralPath '{p}' -Name '{n}' "
+                             f"-Force -ErrorAction SilentlyContinue"),
+}
+
+
+def render_powershell(ops):
+    """İşlem listesini `WRITE_PRELUDE`in fonksiyonlarına çeviren renderer.
+
+    Tanınmayan işlem **gürültüyle** düşer: sessizce atlanan bir işlem, yazımı
+    eksik ama çıkış kodu 0 olan bir koşu üretirdi — bu deponun en pahalı
+    hata sınıfı.
+    """
+    lines = []
+    for op in ops:
+        try:
+            render = _POWERSHELL[op[0]]
+        except KeyError:
+            raise ValueError(f"PowerShell renderer'ında tanınmayan işlem: {op[0]!r}")
+        lines.append(render(*op[1:]))
+    return "\n".join(lines)
+
+
+def bredr_ops(adapter, dev, link_key_hex):
+    """Bir BR/EDR bond'unun ANAHTARINI yazan işlemler.
+
+    Cihaz kaydı ayrı: → `device_record_ops`. Yalnız bu parça yazılırsa
     Windows cihazı `paired` gösterir ve link key ile bağlanır, ama profil
     devnode'ları doğmaz (ölçüldü 2026-09-03).
     """
     a, d = hex12(adapter), hex12(dev)
-    return "\n".join([
-        f"Ensure-Key '{KEYS}\\{a}'",
-        f"Set-Bin '{KEYS}\\{a}' '{d}' '{link_key_hex}'",
-        f"'OK bredr {d}'",
-    ])
+    return [
+        (KEY, f"{KEYS}\\{a}"),
+        (BIN, f"{KEYS}\\{a}", d, link_key_hex),
+        (ECHO, f"OK bredr {d}"),
+    ]
 
 
-def device_record_script(adapter, dev, name, is_le, attrs, services, sdp_records=None):
-    """`Devices\\<mac>` + `ServicesFor<adaptör>` kaydını yazan parça.
+def bredr_script(adapter, dev, link_key_hex):
+    """`bredr_ops`un PowerShell hâli — çağıranların yüzeyi değişmedi."""
+    return render_powershell(bredr_ops(adapter, dev, link_key_hex))
+
+
+def device_record_ops(adapter, dev, name, is_le, attrs, services, sdp_records=None):
+    """`Devices\\<mac>` + `ServicesFor<adaptör>` kaydını yazan işlemler.
 
     `attrs`: BR/EDR için {"COD": int}; LE için {"LEAppearance", "LEAddressType",
     "VID", "PID", "VIDType", "Version"} (olmayanlar atlanır).
@@ -420,80 +484,86 @@ def device_record_script(adapter, dev, name, is_le, attrs, services, sdp_records
     dev_path = f"{DEVICES}\\{d}"
     svc_path = f"{dev_path}\\ServicesFor{a}"
 
-    lines = [
-        f"Ensure-Key '{dev_path}'",
-        f"Set-Dw '{dev_path}' 'DibServiceVersion' {DIB_SERVICE_VERSION}",
+    ops = [
+        (KEY, dev_path),
+        (DW, dev_path, "DibServiceVersion", DIB_SERVICE_VERSION),
     ]
     if name:
-        lines.append(f"Set-Bin '{dev_path}' 'Name' '{name_blob(name)}'")
+        ops.append((BIN, dev_path, "Name", name_blob(name)))
 
     if is_le:
         if name:
-            lines.append(f"Set-Bin '{dev_path}' 'LEName' '{name_blob(name)}'")
-        lines.append(f"Set-Dw '{dev_path}' 'LocalEvaldIoCapLE' {LOCAL_EVALD_IO_CAP_LE}")
+            ops.append((BIN, dev_path, "LEName", name_blob(name)))
+        ops.append((DW, dev_path, "LocalEvaldIoCapLE", LOCAL_EVALD_IO_CAP_LE))
         if attrs.get("LeContainerId"):
-            lines.append(f"Set-Bin '{dev_path}' 'LeContainerId' '{attrs['LeContainerId']}'")
-            lines.append(f"Set-Dw '{dev_path}' 'LeContainerIDSource' 1")
+            ops.append((BIN, dev_path, "LeContainerId", attrs["LeContainerId"]))
+            ops.append((DW, dev_path, "LeContainerIDSource", 1))
         for field in ("LEAppearance", "LEAddressType", "VID", "PID", "VIDType", "Version",
                       "LERemoteConnParamsIntervalMin", "LERemoteConnParamsIntervalMax",
                       "LERemoteConnParamsLatency", "LERemoteConnParamsLSTO"):
             if attrs.get(field) is not None:
-                lines.append(f"Set-Dw '{dev_path}' '{field}' {int(attrs[field])}")
-        lines.append(f"Ensure-Key '{svc_path}'")
+                ops.append((DW, dev_path, field, int(attrs[field])))
+        ops.append((KEY, svc_path))
         for field, value in sorted(LE_SERVICE_FLAGS.items()):
-            lines.append(f"Set-Dw '{svc_path}' '{field}' {value}")
-        lines.append(f"Set-Qw '{svc_path}' 'LEExtendedDeviceInfoFlags' 0")
+            ops.append((DW, svc_path, field, value))
+        ops.append((QW, svc_path, "LEExtendedDeviceInfoFlags", 0))
     else:
-        lines.append(f"Set-Dw '{dev_path}' 'LocalEvaldIoCap' {LOCAL_EVALD_IO_CAP}")
+        ops.append((DW, dev_path, "LocalEvaldIoCap", LOCAL_EVALD_IO_CAP))
         if attrs.get("COD") is not None:
-            lines.append(f"Set-Dw '{dev_path}' 'COD' {int(attrs['COD'])}")
-        lines.append(f"Ensure-Key '{svc_path}'")
+            ops.append((DW, dev_path, "COD", int(attrs["COD"])))
+        ops.append((KEY, svc_path))
         for field, value in sorted(BREDR_SERVICE_FLAGS.items()):
-            lines.append(f"Set-Dw '{svc_path}' '{field}' {value}")
-        lines.append(f"Set-Qw '{svc_path}' 'BRExtendedDeviceInfoFlags' 0")
+            ops.append((DW, svc_path, field, value))
+        ops.append((QW, svc_path, "BRExtendedDeviceInfoFlags", 0))
         if sdp_records:
             cached = f"{dev_path}\\CachedServices"
-            lines.append(f"Ensure-Key '{cached}'")
+            ops.append((KEY, cached))
             for record_name, record_hex in sorted(sdp_records.items()):
-                lines.append(f"Set-Bin '{cached}' '{record_name}' '{record_hex}'")
+                ops.append((BIN, cached, record_name, record_hex))
         for uuid in services:
             uuid_path = f"{svc_path}\\{{{uuid}}}"
             leaf = f"{uuid_path}\\C00000000"
-            lines += [
-                f"Ensure-Key '{uuid_path}'",
-                f"Set-Dw '{uuid_path}' 'Instance' 1",
-                f"Ensure-Key '{leaf}'",
-                f"Set-Zeros '{leaf}' 'PriLangServiceName' {PRI_LANG_SERVICE_NAME_LEN}",
-                f"Set-Str '{leaf}' 'DeviceString' ''",
-                f"Set-Dw '{leaf}' 'CounterInstanceId' 0",
-                f"Set-Dw '{leaf}' 'Enabled' 1",
+            ops += [
+                (KEY, uuid_path),
+                (DW, uuid_path, "Instance", 1),
+                (KEY, leaf),
+                (ZEROS, leaf, "PriLangServiceName", PRI_LANG_SERVICE_NAME_LEN),
+                (STR, leaf, "DeviceString", ""),
+                (DW, leaf, "CounterInstanceId", 0),
+                (DW, leaf, "Enabled", 1),
             ]
 
-    lines.append(f"'OK record {d}'")
-    return "\n".join(lines)
+    ops.append((ECHO, f"OK record {d}"))
+    return ops
 
 
-def le_script(adapter, dev, bond):
-    """Bir LE bond'unun ANAHTARINI yazan PowerShell parçası.
+def device_record_script(adapter, dev, name, is_le, attrs, services, sdp_records=None):
+    """`device_record_ops`un PowerShell hâli."""
+    return render_powershell(device_record_ops(
+        adapter, dev, name, is_le, attrs, services, sdp_records))
+
+
+def le_ops(adapter, dev, bond):
+    """Bir LE bond'unun ANAHTARINI yazan işlemler.
 
     `bond`: {"LTK": hex, "IRK": hex|None, "KeyLength": int, "EDIV": int,
              "ERand": int, "AddressType": int, "AuthReq": int,
              "CEntralIRKStatus": int}
-    Cihaz kaydı ayrı → `device_record_script`.
+    Cihaz kaydı ayrı → `device_record_ops`.
     """
     a, d = hex12(adapter), hex12(dev)
     path = f"{KEYS}\\{a}\\{d}"
-    lines = [
-        f"Ensure-Key '{KEYS}\\{a}'",
-        f"Ensure-Key '{path}'",
-        f"Set-Bin '{path}' 'LTK' '{bond['LTK']}'",
+    ops = [
+        (KEY, f"{KEYS}\\{a}"),
+        (KEY, path),
+        (BIN, path, "LTK", bond["LTK"]),
     ]
     if bond.get("IRK"):
-        lines.append(f"Set-Bin '{path}' 'IRK' '{bond['IRK']}'")
+        ops.append((BIN, path, "IRK", bond["IRK"]))
     for field in ("KeyLength", "EDIV", "AddressType", "AuthReq", "CEntralIRKStatus"):
-        lines.append(f"Set-Dw '{path}' '{field}' {int(bond[field])}")
+        ops.append((DW, path, field, int(bond[field])))
     for field in ("ERand", "Address"):
-        lines.append(f"Set-Qw '{path}' '{field}' {int(bond[field])}")
+        ops.append((QW, path, field, int(bond[field])))
 
     # İmza anahtarları (CSRK) — bu makinede ÖLÇÜLMEDİ: iki test cihazının
     # ikisi de dağıtmıyor. Alan adları ve tipleri kullanıcının 2024'te
@@ -501,27 +571,36 @@ def le_script(adapter, dev, bond):
     # Hangi yönün hangi ada karşılık geldiği (BlueZ `[LocalSignatureKey]` →
     # `CSRK`) türetim, ölçüm değil.
     if bond.get("CSRK"):
-        lines.append(f"Set-Bin '{path}' 'CSRK' '{bond['CSRK']}'")
-        lines.append(f"Set-Dw '{path}' 'OutboundSignCounter' {int(bond.get('OutboundSignCounter', 0))}")
+        ops.append((BIN, path, "CSRK", bond["CSRK"]))
+        ops.append((DW, path, "OutboundSignCounter",
+                    int(bond.get("OutboundSignCounter", 0))))
     if bond.get("CSRKInbound"):
-        lines.append(f"Set-Bin '{path}' 'CSRKInbound' '{bond['CSRKInbound']}'")
-        lines.append(f"Set-Qw '{path}' 'InboundSignCounter' {int(bond.get('InboundSignCounter', 0))}")
+        ops.append((BIN, path, "CSRKInbound", bond["CSRKInbound"]))
+        ops.append((QW, path, "InboundSignCounter",
+                    int(bond.get("InboundSignCounter", 0))))
 
-    lines.append(f"'OK le {d}'")
-    return "\n".join(lines)
+    ops.append((ECHO, f"OK le {d}"))
+    return ops
+
+
+def le_script(adapter, dev, bond):
+    """`le_ops`un PowerShell hâli."""
+    return render_powershell(le_ops(adapter, dev, bond))
+
+
+def remove_ops(adapter, dev, is_le):
+    """Bir bond'u misafirden silen işlemler (geri alma için)."""
+    a, d = hex12(adapter), hex12(dev)
+    ops = []
+    if is_le:
+        ops.append((DEL_KEY, f"{KEYS}\\{a}\\{d}"))
+    else:
+        ops.append((DEL_VALUE, f"{KEYS}\\{a}", d))
+    ops.append((DEL_KEY, f"{DEVICES}\\{d}"))
+    ops.append((ECHO, f"OK removed {d}"))
+    return ops
 
 
 def remove_script(adapter, dev, is_le):
-    """Bir bond'u misafirden silen PowerShell parçası (geri alma için)."""
-    a, d = hex12(adapter), hex12(dev)
-    lines = []
-    if is_le:
-        lines.append(f"Remove-Item -LiteralPath '{KEYS}\\{a}\\{d}' -Recurse -Force "
-                     f"-ErrorAction SilentlyContinue")
-    else:
-        lines.append(f"Remove-ItemProperty -LiteralPath '{KEYS}\\{a}' -Name '{d}' "
-                     f"-Force -ErrorAction SilentlyContinue")
-    lines.append(f"Remove-Item -LiteralPath '{DEVICES}\\{d}' -Recurse -Force "
-                 f"-ErrorAction SilentlyContinue")
-    lines.append(f"'OK removed {d}'")
-    return "\n".join(lines)
+    """`remove_ops`un PowerShell hâli."""
+    return render_powershell(remove_ops(adapter, dev, is_le))

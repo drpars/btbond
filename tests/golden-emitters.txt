@@ -1,0 +1,194 @@
+===== 01 bredr =====
+Ensure-Key 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Keys\001122334455'
+Set-Bin 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Keys\001122334455' 'aabbccddeeff' 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+'OK bredr aabbccddeeff'
+===== 02 record BR/EDR tam =====
+Ensure-Key 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff'
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff' 'DibServiceVersion' 131072
+Set-Bin 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff' 'Name' '54657374204b756c616b6cc4b16b00'
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff' 'LocalEvaldIoCap' 1
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff' 'COD' 2360324
+Ensure-Key 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455'
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455' 'AuthenticationRequirements' 5
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455' 'BRFlags' 0
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455' 'BasebandSupport' 16384
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455' 'IoCapability' 1
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455' 'RemoteAuthenticationRequirements' 5
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455' 'SSP MITM Protected' 1
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455' 'SSP Paired' 1
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455' 'SSP Supported' 1
+Set-Qw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455' 'BRExtendedDeviceInfoFlags' 0
+Ensure-Key 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\CachedServices'
+Set-Bin 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\CachedServices' '0' 'bbbbbbbbbbbbbbbb'
+Set-Bin 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\CachedServices' '1' 'cccccccccccccccc'
+Ensure-Key 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455\{0000110b-0000-1000-8000-00805f9b34fb}'
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455\{0000110b-0000-1000-8000-00805f9b34fb}' 'Instance' 1
+Ensure-Key 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455\{0000110b-0000-1000-8000-00805f9b34fb}\C00000000'
+Set-Zeros 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455\{0000110b-0000-1000-8000-00805f9b34fb}\C00000000' 'PriLangServiceName' 256
+Set-Str 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455\{0000110b-0000-1000-8000-00805f9b34fb}\C00000000' 'DeviceString' ''
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455\{0000110b-0000-1000-8000-00805f9b34fb}\C00000000' 'CounterInstanceId' 0
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455\{0000110b-0000-1000-8000-00805f9b34fb}\C00000000' 'Enabled' 1
+Ensure-Key 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455\{0000110e-0000-1000-8000-00805f9b34fb}'
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455\{0000110e-0000-1000-8000-00805f9b34fb}' 'Instance' 1
+Ensure-Key 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455\{0000110e-0000-1000-8000-00805f9b34fb}\C00000000'
+Set-Zeros 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455\{0000110e-0000-1000-8000-00805f9b34fb}\C00000000' 'PriLangServiceName' 256
+Set-Str 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455\{0000110e-0000-1000-8000-00805f9b34fb}\C00000000' 'DeviceString' ''
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455\{0000110e-0000-1000-8000-00805f9b34fb}\C00000000' 'CounterInstanceId' 0
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455\{0000110e-0000-1000-8000-00805f9b34fb}\C00000000' 'Enabled' 1
+'OK record aabbccddeeff'
+===== 03 record BR/EDR minimal =====
+Ensure-Key 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff'
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff' 'DibServiceVersion' 131072
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff' 'LocalEvaldIoCap' 1
+Ensure-Key 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455'
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455' 'AuthenticationRequirements' 5
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455' 'BRFlags' 0
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455' 'BasebandSupport' 16384
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455' 'IoCapability' 1
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455' 'RemoteAuthenticationRequirements' 5
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455' 'SSP MITM Protected' 1
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455' 'SSP Paired' 1
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455' 'SSP Supported' 1
+Set-Qw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455' 'BRExtendedDeviceInfoFlags' 0
+'OK record aabbccddeeff'
+===== 04 record LE tam =====
+Ensure-Key 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff'
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff' 'DibServiceVersion' 131072
+Set-Bin 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff' 'Name' '54657374204661726500'
+Set-Bin 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff' 'LEName' '54657374204661726500'
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff' 'LocalEvaldIoCapLE' 4
+Set-Bin 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff' 'LeContainerId' 'dddddddddddddddddddddddddddddddd'
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff' 'LeContainerIDSource' 1
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff' 'LEAppearance' 962
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff' 'LEAddressType' 1
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff' 'VID' 1234
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff' 'PID' 5678
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff' 'VIDType' 1
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff' 'Version' 311
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff' 'LERemoteConnParamsIntervalMin' 6
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff' 'LERemoteConnParamsIntervalMax' 12
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff' 'LERemoteConnParamsLatency' 0
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff' 'LERemoteConnParamsLSTO' 500
+Ensure-Key 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455'
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455' 'AuthenticationRequirementsLE' 3
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455' 'BasebandSupport' 32768
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455' 'IoCapabilityLE' 255
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455' 'LEFlags' 268632064
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455' 'RemoteAuthenticationRequirementsLE' 255
+Set-Qw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455' 'LEExtendedDeviceInfoFlags' 0
+'OK record aabbccddeeff'
+===== 05 record LE minimal =====
+Ensure-Key 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff'
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff' 'DibServiceVersion' 131072
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff' 'LocalEvaldIoCapLE' 4
+Ensure-Key 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455'
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455' 'AuthenticationRequirementsLE' 3
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455' 'BasebandSupport' 32768
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455' 'IoCapabilityLE' 255
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455' 'LEFlags' 268632064
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455' 'RemoteAuthenticationRequirementsLE' 255
+Set-Qw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455' 'LEExtendedDeviceInfoFlags' 0
+'OK record aabbccddeeff'
+===== 06 le tam =====
+Ensure-Key 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Keys\001122334455'
+Ensure-Key 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Keys\001122334455\aabbccddeeff'
+Set-Bin 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Keys\001122334455\aabbccddeeff' 'LTK' 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+Set-Bin 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Keys\001122334455\aabbccddeeff' 'IRK' 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Keys\001122334455\aabbccddeeff' 'KeyLength' 16
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Keys\001122334455\aabbccddeeff' 'EDIV' 12345
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Keys\001122334455\aabbccddeeff' 'AddressType' 1
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Keys\001122334455\aabbccddeeff' 'AuthReq' 45
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Keys\001122334455\aabbccddeeff' 'CEntralIRKStatus' 1
+Set-Qw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Keys\001122334455\aabbccddeeff' 'ERand' 18446744073709551615
+Set-Qw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Keys\001122334455\aabbccddeeff' 'Address' 9223372036854775808
+Set-Bin 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Keys\001122334455\aabbccddeeff' 'CSRK' 'cccccccccccccccccccccccccccccccc'
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Keys\001122334455\aabbccddeeff' 'OutboundSignCounter' 7
+Set-Bin 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Keys\001122334455\aabbccddeeff' 'CSRKInbound' 'dddddddddddddddddddddddddddddddd'
+Set-Qw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Keys\001122334455\aabbccddeeff' 'InboundSignCounter' 9
+'OK le aabbccddeeff'
+===== 07 le minimal =====
+Ensure-Key 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Keys\001122334455'
+Ensure-Key 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Keys\001122334455\aabbccddeeff'
+Set-Bin 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Keys\001122334455\aabbccddeeff' 'LTK' 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Keys\001122334455\aabbccddeeff' 'KeyLength' 16
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Keys\001122334455\aabbccddeeff' 'EDIV' 0
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Keys\001122334455\aabbccddeeff' 'AddressType' 0
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Keys\001122334455\aabbccddeeff' 'AuthReq' 45
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Keys\001122334455\aabbccddeeff' 'CEntralIRKStatus' 1
+Set-Qw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Keys\001122334455\aabbccddeeff' 'ERand' 0
+Set-Qw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Keys\001122334455\aabbccddeeff' 'Address' 0
+'OK le aabbccddeeff'
+===== 08 le imza sayaçsız =====
+Ensure-Key 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Keys\001122334455'
+Ensure-Key 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Keys\001122334455\aabbccddeeff'
+Set-Bin 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Keys\001122334455\aabbccddeeff' 'LTK' 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Keys\001122334455\aabbccddeeff' 'KeyLength' 16
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Keys\001122334455\aabbccddeeff' 'EDIV' 0
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Keys\001122334455\aabbccddeeff' 'AddressType' 0
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Keys\001122334455\aabbccddeeff' 'AuthReq' 45
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Keys\001122334455\aabbccddeeff' 'CEntralIRKStatus' 1
+Set-Qw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Keys\001122334455\aabbccddeeff' 'ERand' 0
+Set-Qw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Keys\001122334455\aabbccddeeff' 'Address' 0
+Set-Bin 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Keys\001122334455\aabbccddeeff' 'CSRK' 'cccccccccccccccccccccccccccccccc'
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Keys\001122334455\aabbccddeeff' 'OutboundSignCounter' 0
+Set-Bin 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Keys\001122334455\aabbccddeeff' 'CSRKInbound' 'dddddddddddddddddddddddddddddddd'
+Set-Qw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Keys\001122334455\aabbccddeeff' 'InboundSignCounter' 0
+'OK le aabbccddeeff'
+===== 09 remove LE =====
+Remove-Item -LiteralPath 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Keys\001122334455\aabbccddeeff' -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff' -Recurse -Force -ErrorAction SilentlyContinue
+'OK removed aabbccddeeff'
+===== 10 remove BR/EDR =====
+Remove-ItemProperty -LiteralPath 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Keys\001122334455' -Name 'aabbccddeeff' -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff' -Recurse -Force -ErrorAction SilentlyContinue
+'OK removed aabbccddeeff'
+===== 11 WRITE_PRELUDE =====
+
+$ErrorActionPreference = 'Stop'
+
+function Hex-Bytes($h) {
+  $b = New-Object byte[] ($h.Length / 2)
+  for ($i = 0; $i -lt $b.Length; $i++) {
+    $b[$i] = [Convert]::ToByte($h.Substring($i * 2, 2), 16)
+  }
+  ,$b
+}
+
+function Ensure-Key($p) {
+  # `New-Item`in `-LiteralPath` parametresi YOK (ölçüldü: PowerShell 5.1
+  # misafirde `NamedParameterNotFound` ile düşüyor) — yalnız `-Path` var.
+  # Anahtar adları hex MAC olduğu için joker karakter riski yok.
+  if (-not (Test-Path -LiteralPath $p)) { New-Item -Path $p -Force | Out-Null }
+}
+
+function Set-Bin($p, $n, $hex) {
+  New-ItemProperty -LiteralPath $p -Name $n -PropertyType Binary `
+    -Value (Hex-Bytes $hex) -Force | Out-Null
+}
+
+function Set-Dw($p, $n, $v) {
+  $raw = [BitConverter]::ToInt32([BitConverter]::GetBytes([UInt32]$v), 0)
+  New-ItemProperty -LiteralPath $p -Name $n -PropertyType DWord `
+    -Value $raw -Force | Out-Null
+}
+
+function Set-Qw($p, $n, $v) {
+  $raw = [BitConverter]::ToInt64([BitConverter]::GetBytes([UInt64]$v), 0)
+  New-ItemProperty -LiteralPath $p -Name $n -PropertyType QWord `
+    -Value $raw -Force | Out-Null
+}
+
+function Set-Str($p, $n, $v) {
+  New-ItemProperty -LiteralPath $p -Name $n -PropertyType String `
+    -Value $v -Force | Out-Null
+}
+
+# Sıfır tamponu misafirde üretiliyor, hex olarak GÖNDERİLMİYOR: betik
+# `-EncodedCommand` ile gidiyor ve Windows'un komut satırı sınırı aşılırsa
+# `guest-exec` "Failed to execute helper program (Invalid argument)" ile
+# düşüyor (ölçüldü 2026-09-03: beş profilli tek bir BR/EDR kaydı sınırı aştı).
+function Set-Zeros($p, $n, $len) {
+  New-ItemProperty -LiteralPath $p -Name $n -PropertyType Binary `
+    -Value (New-Object byte[] $len) -Force | Out-Null
+}
+

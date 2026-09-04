@@ -295,6 +295,27 @@ dosyanın kendisi (`Windows/System32/config/SYSTEM`). Bir kurtarma bölümü de
 NTFS'tir ve araç onu reddeder. `CurrentControlSet` offline kovanda **yoktur**;
 gerçek set `Select\Current`ten çözülür.
 
+## Testler
+
+Misafir, root ve kovan gerektirmeyen iki sözleşme testi:
+
+```
+tests/test_emitters.py       # altın çıktı: yazma emitörleri aynı metni üretiyor mu
+tests/test_transport.py      # taşıyıcı ve model sözleşmeleri
+tests/test_emitters.py --update   # altın dosyayı KASITLI olarak yenile
+```
+
+**Neden altın çıktı.** Yazma emitörleri artık PowerShell metni değil, yazma
+**işlemleri** (IR) üretiyor; renderer'lar onu metne çeviriyor. Ayrımın amacı
+offline kovan yazma yolunu **ikinci bir düzen sahibi yaratmadan** eklemek — ama
+yazma yolunu değiştiren her adım sessizce bozabilir: eksik bir işlem, hatalı bir
+tip ya da kayan bir alan sırası çıkış kodunu değiştirmez, misafirde yanlış bir
+kayıt bırakır ve cihaz `paired` görünür. Test girdileri sabitliyor ve çıktıyı
+**birebir** karşılaştırıyor. `--update` yalnız çıktı kasıtlı değiştiğinde
+kullanılır; diff commit'te okunur.
+
+Testlerde **makineye özel kimlik yok** — MAC'ler uydurma, anahtarlar dolgu.
+
 ## Güvenlik
 
 Bu deponun konusu tanımı gereği sırdır: `LinkKey`, `LTK`, `IRK`, `CSRK`. Bir
@@ -336,6 +357,8 @@ MIT → [LICENSE](LICENSE).
 - [ ] Offline kovan **yazma** — önce hızlı başlatma / `hiberfil` denetimi
 - [x] Çoklu taraf: `--domain` tekrarlanabilir, kapsam kullanıcının seçimi,
       ulaşılamayan taraf atlanıyor, taraflar arası ayrışma raporlanıyor
+- [x] Yazma emitörleri düzenden ayrıldı (ara temsil + renderer'lar), altın
+      çıktı denkliğiyle: refactor öncesi/sonrası metin **birebir aynı**
 - [ ] `collect` + `distribute` iki fazlı akış (host kanonik kopya)
 - [ ] Offline taraf `status`ta görünsün — domain'in diskini kendi bulup
       mount etmesi gerekiyor (bugün mount elle yapılıyor)
