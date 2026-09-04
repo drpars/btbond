@@ -224,7 +224,8 @@ Arch'ta paket olarak: `packaging/PKGBUILD`. Sistem bağımlılıklarının **ger
 listesi orada** — `pyproject.toml`ın `dependencies`i bilerek boş, çünkü
 ihtiyaçların çoğu PyPI paketi değil (`bluez`, `hcitool`, `virsh`, `qemu-nbd`,
 `hivex`) ve pip onları çözemez; oraya yazmak pip'e tutamayacağı bir söz
-verdirirdi.
+verdirirdi. **PKGBUILD henüz koşturulmadı:** bir sürüm etiketine bakıyor ve
+depoda henüz etiket yok; gerekçe dosyanın kendi başlığında.
 
 Kurmadan da koşar — depo kökünden `python -m btbond <alt-komut>`. Araç kendini
 alt süreç olarak çağırdığında (TUI'nin yazıcıları, `sync`in fazları) hangisinin

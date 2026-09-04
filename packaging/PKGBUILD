@@ -6,6 +6,16 @@
 # `depends` yalnız HER koşuda gerekenleri taşıyor; kanala ya da alt komuta
 # özel olanlar `optdepends`ta ve orada NE İÇİN gerektikleri yazılı — kurulu
 # olmadıklarında araç susmuyor, eksikliği söylüyor.
+#
+# HENÜZ KOŞTURULMADI, ve sebebi burada yazılı olsun: `source` bir sürüm
+# etiketine bakıyor (`v0.1.0`) ve depoda **hiç etiket yok** (ölçüldü
+# 2026-09-04), yani `makepkg` bu hâliyle indiremez. Etiket atılınca
+# `sha256sums` da `SKIP` olmaktan çıkarılmalı. Yerelden denemek için `source`
+# yerine `git+file:///home/…/btbond` kullanılabilir.
+#
+# Build ve package adımlarının aletleri de bu makinede kurulu DEĞİL
+# (`python-build`, `python-installer`); wheel'in kendisi `pip install .` ile
+# üretilip temiz bir venv'de sınandı, ama `makepkg` yolu koşturulmadı.
 
 pkgname=btbond
 pkgver=0.1.0
