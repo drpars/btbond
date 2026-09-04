@@ -616,8 +616,10 @@ MIT → [LICENSE](LICENSE).
 - [ ] `→ misafir` için aynısı: Windows BT yığınını PnP'den kapat/aç (ölçülmedi)
 - [x] Öğrenilen dört alan araçla toplanıyor (`remote-info`, devir gerekmez) ve
       `bluez-to-win.py` onları **yazıyor** — eskiden elle yazılıyorlardı
-- [ ] Aracın yazdığı öğrenilen alanların, Windows'un hiç görmediği bir cihazda
-      profil devnode'unu gerçekten doğurduğu (elle yazımda ölçüldü, araçla değil)
+- [x] Aracın yazdığı kayıt, Windows'un hiç görmediği bir cihazda profil
+      devnode'larını **sürücüleriyle** doğuruyor ve ses geliyor — eksik parça
+      `DynamicCachedServices`ti, altın kayıtla diff bulup tek değişkenli test
+      doğruladı (2026-09-04)
 
 ## Bilinen boşluk
 
@@ -644,11 +646,15 @@ işleyicisi yok, oysa kardeşlerinin hepsi var. Komut kullanıcı alanından
 yollanınca (`hcitool cmd`) olay geliyor, ve bu var olan bir bağlantıda da
 çalışıyor.
 
-**Kalan boşluk daralttı ama kapanmadı:** alanların Windows'ta profil
-devnode'unu doğurduğu **elle yazıldığında** ölçüldü (beş profil düğümü doğdu,
-ses geldi); aracın yazdığı hâliyle, Windows'un **hiç görmediği** bir cihazda
-uçtan uca sınanmadı. Bu deponun ölçütüyle: o yarı hâlâ kayıt, cihazın
-çalışması değil.
+**Boşluk kapandı (2026-09-04), ve kapatan şey bu dört alan değildi.** Dördü
+yazılıyken bile Windows A2DP sürücüsünü bağlamıyor, link ~20 sn'de düşüyordu.
+Windows'un kendi eşleştirdiği bir kayıtla diff alınınca (46 değer aynı) tek
+yapısal fark kaldı: **`DynamicCachedServices`**. Windows servis düğümlerini
+`CachedServices`ten değil oradan açıyor; içerik aynı SDP kayıtları, yalnız
+dış sarmalın uzunluk kodlaması farklı (`35 LL` ↔ `36 00LL`). Dönüşüm beş
+gerçek kayıtta bayt bayt doğrulandı, ve tek değişkenli uçtan uca testte
+sürücüler BTHPORT başlar başlamaz bağlandı, link tuttu, ses uç noktaları
+doğdu — aracın yazdığı kayıttan. Ayrıntı → `winbond.DYNAMIC_NOTU`.
 
-Bu boşluk **yalnız BR/EDR profillerini** etkiler: bond, kimlik doğrulaması ve
-LE tarafının tamamı bu alanlar olmadan da çalışıyor.
+Bu boşluk **yalnız BR/EDR profillerini** etkiliyordu: bond, kimlik doğrulaması
+ve LE tarafının tamamı bu alanlar olmadan da çalışıyor.
