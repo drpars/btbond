@@ -30,6 +30,7 @@ import bluezbond  # noqa: E402
 import winbond  # noqa: E402
 import agentexec  # noqa: E402
 import hivebond  # noqa: E402
+import sidemount  # noqa: E402
 from agentexec import run_powershell  # noqa: E402
 
 # Bu makinenin radyosu; başka makinede değişir, o yüzden CLI'dan geçilebiliyor.
@@ -71,11 +72,21 @@ VERDICT_DIRECTION = {
 FORBIDDEN_SIDE = {"to-host": "host", "to-guest": "guest"}
 
 
-def write_gate(radio, direction):
+def write_gate(radio, direction, stack_restart=False):
     """Bu yönde yazmak ETKİLİ olur mu? Döner: `(izin, sebep)`.
 
-    Kapının sorduğu şey *"radyo nerede"* değil, *"**hedef** onu tutuyor mu"* —
-    hedef taraf radyoyu tutarken yazmak hata vermez, **sessizce etkisiz
+    Kapının ASIL sorusu (2026-09-04'te düzeltildi): *"bu yazımdan sonra hedef
+    anahtarları TAZE okuyabilecek mi?"* Bunun iki cevabı var — radyo sonradan
+    gelir, **ya da** yığın yeniden başlar. Eski kapı yalnız birincisini
+    biliyordu ve host için yazılımsal bir probleme donanım devri dayatıyordu;
+    kullanıcı haklı olarak itiraz etti. `stack_restart=True` ikinci cevabı
+    taşıyor: host radyoyu tutsa da `bluetoothd` durdurulup başlatılacaksa
+    yazım etkili olur (`win-to-bluez.py --stop-bluetooth`).
+
+    Misafir tarafında karşılığı (Windows BT yığınını PnP'den kapat/aç)
+    **ölçülmedi**, o yüzden `to-guest` için bu kaçış yok.
+
+    Hedef taraf radyoyu tutarken yazmak hata vermez, **sessizce etkisiz
     kalır** (BlueZ bond'ları adaptör kurulurken okur, Windows `BTHPORT`
     sürücü başlarken). Ölçemediğinde de durur: varsayımla geçilmez.
 
@@ -90,10 +101,15 @@ def write_gate(radio, direction):
     """
     side = FORBIDDEN_SIDE[direction]
     here = radio[side]
+    if here and direction == "to-host" and stack_restart:
+        return True, ("host radyoyu tutuyor ama bluetoothd durdurulup "
+                      "başlatılacak — adaptör yeniden kurulur, devir gerekmiyor")
     if here:
+        hint = (" Ya radyo öbür tarafa alınır, ya da `--stop-bluetooth` ile "
+                "bluetoothd durdurulup yazılır (devirsiz)."
+                if direction == "to-host" else " Önce radyo öbür tarafa alınır.")
         return False, (f"hedef ({side}) radyoyu tutuyor. Bu sırada yazmak hata "
-                       f"vermez, sessizce etkisiz kalır — önce radyo öbür "
-                       f"tarafa alınır.")
+                       f"vermez, sessizce etkisiz kalır.{hint}")
     if here is None:
         return False, (f"hedefin ({side}) radyoyu tutup tutmadığı ÖLÇÜLEMEDİ; "
                        f"kapı varsayımla geçilmez.")
@@ -386,7 +402,8 @@ def survey(domain=DEFAULT_DOMAIN, root=bluezbond.ROOT, usb_id=DEFAULT_USB_ID,
     return result
 
 
-def survey_all(domains, root=bluezbond.ROOT, usb_id=DEFAULT_USB_ID, offline=None):
+def survey_all(domains, root=bluezbond.ROOT, usb_id=DEFAULT_USB_ID, offline=None,
+               automount=False, log=None):
     """Her domain için ayrı bir `survey`; ulaşılamayan taraf ATLANIR.
 
     Model **eşleştirmeli kalıyor** (host ↔ bir misafir) ve bu bilinçli: host
@@ -402,17 +419,34 @@ def survey_all(domains, root=bluezbond.ROOT, usb_id=DEFAULT_USB_ID, offline=None
     öldürüyordu.
     """
     offline = offline or {}
+    log = log or (lambda message: None)
     sides = []
     for domain in domains:
         try:
             sides.append(survey(domain, root, usb_id, offline.get(domain)))
+            continue
         except (RuntimeError, hivebond.HiveError) as exc:   # AgentError dahil
-            # ULAŞILAMAYAN TARAF ÜÇÜNCÜ BİR DURUM: diski bulunabiliyorsa taraf
-            # **var** ve yalnız ÖLÇÜLMEDİ. "Bond yok" ile "ölçmedim" aynı
-            # görünmesin diye disk burada aranıyor — salt-okuma, hiçbir şey
-            # bağlanmıyor.
-            sides.append({"domain": domain, "error": str(exc),
-                          "disk": side_disk(domain)})
+            error = str(exc)
+
+        # ULAŞILAMAYAN TARAF ÜÇÜNCÜ BİR DURUM: diski bulunabiliyorsa taraf
+        # **var** ve yalnız ÖLÇÜLMEDİ. `automount` verildiyse burada
+        # SALT-OKUMA bağlanıp okunur ve hemen çözülür (`sidemount.Mounted`,
+        # garantili temizlik) — kullanıcı elle mount etmek zorunda kalmasın.
+        # Domain koşuyorsa `Mounted` reddeder; koşan VM'in diski bağlanmaz.
+        disk = side_disk(domain)
+        if automount and disk and domain not in offline:
+            try:
+                with sidemount.Mounted(domain, disk, rw=False, log=log) as mount:
+                    state = survey(domain, root, usb_id, str(mount))
+                # Yazma turu bu tarafı RW yeniden bağlamak zorunda; disk
+                # bilgisi durumda taşınıyor ki `run_phase` yeniden keşfetmesin.
+                state["automounted"] = True
+                state["disk"] = disk
+                sides.append(state)
+                continue
+            except (sidemount.MountError, hivebond.HiveError, RuntimeError) as exc:
+                error = f"{error}; otomatik bağlama: {exc}"
+        sides.append({"domain": domain, "error": error, "disk": disk})
     return {"sides": sides, "cross": cross_sides(sides)}
 
 

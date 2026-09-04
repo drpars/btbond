@@ -201,6 +201,21 @@ tek_satir["rows"][0]["verdict"] = bondsync.GUEST_ONLY
 check("engellenen cihazla faz yazmaya kalkmıyor",
       btbond_sync.run_phase(None, tek_satir, "to-host", {DEV_MAC}), 0)
 
+print("\n=== write_gate: 'hedef radyoyu tutuyor' artık tek cevap değil ===")
+# Kapının asıl sorusu "hedef TAZE okuyabilecek mi": radyo sonradan gelir YA DA
+# yığın yeniden başlar. Host için ikincisi bluetoothd stop/start; misafir için
+# karşılığı ölçülmedi, o yüzden orada kaçış yok.
+host_holds = {"host": True, "guest": False}
+check("host tutuyor, restart yok -> DURUR",
+      bondsync.write_gate(host_holds, "to-host")[0], False)
+check("host tutuyor, restart var -> GEÇER",
+      bondsync.write_gate(host_holds, "to-host", stack_restart=True)[0], True)
+check("ret mesajı çareyi söylüyor",
+      "--stop-bluetooth" in bondsync.write_gate(host_holds, "to-host")[1], True)
+guest_holds = {"host": False, "guest": True}
+check("misafir tutuyor, restart bayrağı misafiri GEÇİRMEZ (ölçülmedi)",
+      bondsync.write_gate(guest_holds, "to-guest", stack_restart=True)[0], False)
+
 print("\n=== resolve_domains: kapsam ===")
 check("açık liste tekilleşiyor, sıra korunuyor",
       btbond_sync.resolve_domains(["x", "y", "x"])[0], ["x", "y"])

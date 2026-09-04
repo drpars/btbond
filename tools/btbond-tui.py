@@ -48,6 +48,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import bluezbond  # noqa: E402
 import bondsync  # noqa: E402
+import sidemount  # noqa: E402
 
 from textual import work  # noqa: E402
 from textual.app import App, ComposeResult  # noqa: E402
@@ -84,7 +85,17 @@ HELP = """\
   d        seçili satırın ayrıntısı (parmak izleri, teknoloji, adres tipi)
   Enter    satırın İMA ETTİĞİ yönde replike et — yön satırın özelliği
   s        TOPLA + DAĞIT (iki fazlı akış, kapsamın tamamı)
-  h        radyoyu devret (seçili satırın domain'i)
+  h        radyoyu devret (seçili satırın domain'i) — yalnız cihazları
+           o tarafta KULLANMAK için; yazımın etkili olması için gerekmez
+
+[b]Kapalı misafir[/b]
+  Diski bulunuyor ve kendiliğinden salt-okuma bağlanıp okunuyor (koşan VM
+  asla bağlanmaz). Yazım anında RW yeniden bağlanır, bitince çözülür.
+
+[b]→ host yazımı ve radyo[/b]
+  Radyo host'tayken yazmak için devir GEREKMEZ: bluetoothd durdurulur,
+  yazılır, başlatılır — adaptör yeniden kurulur ve anahtarları taze okur.
+  Bedeli: host BT bağlantıları birkaç saniye düşer.
   ?        bu yardım
   q        çık
 
@@ -241,11 +252,17 @@ class BtbondTui(App):
         Binding("question_mark", "help", "yardım"),
     ]
 
-    def __init__(self, domains, root, usb_id, offline=None):
+    def __init__(self, domains, root, usb_id, offline=None, automount=True,
+                 stop_bluetooth=True):
         super().__init__()
         self.domains, self.root, self.usb_id = domains, root, usb_id
         # `{domain: mount}` — bu domain'ler ajan yerine KOVANDAN okunuyor.
         self.offline = offline or {}
+        # Kullanıcı dostu varsayılanlar (CLI ile aynı): kapalı misafir
+        # kendiliğinden bağlanıp okunur; `→ host` yazımında bluetoothd
+        # durdurulup başlatılır, radyo devri gerekmez.
+        self.automount = automount
+        self.stop_bluetooth = stop_bluetooth
         self.survey = None
         self.measured_at = None
         self.stale = False          # yazımdan sonra tablo bayat sayılır
@@ -275,8 +292,11 @@ class BtbondTui(App):
     def _measure(self) -> None:
         started = time.time()
         try:
-            survey = bondsync.survey_all(self.domains, self.root, self.usb_id,
-                                         self.offline)
+            survey = bondsync.survey_all(
+                self.domains, self.root, self.usb_id, self.offline,
+                automount=self.automount and os.geteuid() == 0,
+                log=lambda m: self.call_from_thread(
+                    self.query_one("#log", RichLog).write, f"[dim]{m}[/dim]"))
         except Exception as exc:                       # noqa: BLE001 - UI'ye taşınıyor
             self.call_from_thread(self._measure_failed, str(exc))
             return
@@ -308,6 +328,8 @@ class BtbondTui(App):
             else:
                 channel = "kovan" if side.get("channel", "").startswith("offline") \
                     else "ajan"
+                if side.get("automounted"):
+                    channel += ", otomatik bağlandı"
                 bands.append(f"{side['domain']} ({channel}): "
                              f"radyo {side['radio']['where']}")
         took = f"  ({elapsed:.2f} sn)" if elapsed is not None else ""
@@ -332,6 +354,15 @@ class BtbondTui(App):
                 else:
                     table.add_row(side["domain"], "—", "—", "ULAŞILAMADI", "",
                                   side["error"][:58])
+                continue
+            if not side["rows"]:
+                # DÖRDÜNCÜ DURUM: taraf OKUNDU ve boş. Satırsız bırakılırsa
+                # tablodan kaybolur ve "ölçülmedi" ile karışır — oysa bu bir
+                # olumlu ölçüm: bakıldı, bond yok.
+                self.rows.append((side["domain"], None))
+                table.add_row(side["domain"], "—", "—", "OKUNDU — bond yok", "",
+                              (side["warnings"][0][:58] if side["warnings"]
+                               else "bu tarafta eşleşmiş cihaz yok"))
                 continue
             for row in side["rows"]:
                 verdict = VERDICT_LABEL[row["verdict"]]
@@ -369,6 +400,10 @@ class BtbondTui(App):
             cmd += ["--domain", domain]
         for domain, mount in self.offline.items():
             cmd += ["--offline", f"{domain}={mount}"]
+        if not self.automount:
+            cmd.append("--no-auto-mount")
+        if not self.stop_bluetooth:
+            cmd.append("--no-stop-bluetooth")
         body = (f"kapsam: {', '.join(self.domains)}\n"
                 f"TOPLA (taraflardan host'a) → yeniden ölç → DAĞIT (host'tan "
                 f"taraflara)\n"
@@ -420,6 +455,14 @@ class BtbondTui(App):
             elif side:
                 log.write(f"[b]{domain}[/b] ULAŞILAMADI — disk da bulunamadı")
                 log.write(f"   {side['error']}")
+            else:
+                read = next((x for x in self.survey["sides"]
+                             if x.get("domain") == domain and "error" not in x), None)
+                if read is not None:
+                    log.write(f"[b]{domain}[/b] OKUNDU — bond yok  (kanal: "
+                              f"{read.get('channel', '?')})")
+                    for warning in read["warnings"]:
+                        log.write(f"   {warning}")
             return
         log.write(f"[b]{row['dev']}[/b] {row['name']}  ({row['tech']}, "
                   f"taraf {domain})")
@@ -457,8 +500,13 @@ class BtbondTui(App):
         """Kapıyı sor, sonra komutu ONAY ekranında göster."""
         side = next(s for s in self.survey["sides"]
                     if s.get("domain") == domain and "error" not in s)
+        # `→ host` ve host radyoyu tutuyorsa: bluetoothd durdurulup başlatılır,
+        # radyo devri gerekmez (CLI ile aynı davranış).
+        stop_bt = (direction == "to-host" and bool(side["radio"]["host"])
+                   and self.stop_bluetooth)
         # KAPI — `bondsync.write_gate`, tek sahip. TUI'nin kendi kopyası YOK.
-        allowed, reason = bondsync.write_gate(side["radio"], direction)
+        allowed, reason = bondsync.write_gate(side["radio"], direction,
+                                              stack_restart=stop_bt)
         log = self.query_one("#log", RichLog)
         if not allowed:
             log.write(f"[red]DURDU:[/red] {reason}")
@@ -467,28 +515,52 @@ class BtbondTui(App):
                "--root", self.root, "--only", row["dev"]]
         if forced:
             cmd.append("--force")
+        if stop_bt:
+            cmd.append("--stop-bluetooth")
+        # Offline taraf: kullanıcı mount'u varsa o; otomatik bağlanmışsa yazım
+        # anında RW yeniden bağlanır (`_run` içinde, iş parçacığında).
+        mount_for_write = None
+        if domain in self.offline:
+            cmd += ["--offline", self.offline[domain]]
+        elif side.get("automounted"):
+            mount_for_write = (domain, side["disk"])
+        notes = []
+        if stop_bt:
+            notes.append("[b]bluetoothd kısa süre duracak[/b] (host BT bağlantıları "
+                         "düşer), sonra başlatılıp okunacak — radyo devri gerekmiyor.")
+        if mount_for_write:
+            notes.append(f"[b]{domain} diski yazım için RW bağlanacak[/b] "
+                         f"({side['disk']['path']}), bitince çözülecek.")
+        if forced:
+            notes.append("[b]--force[/b]: hedefteki kayıt ÜZERİNE yazılacak.")
         body = (f"{row['dev']}  {row['name']}\n"
                 f"yön: {ARROW[direction]}   taraf: {domain}\n"
-                f"kapı: {reason}"
-                + ("\n[b]--force[/b]: hedefteki kayıt ÜZERİNE yazılacak."
-                   if forced else ""))
+                f"kapı: {reason}" + "".join("\n" + n for n in notes))
         self.push_screen(Confirm(f"Replike et — {ARROW[direction]}", body, cmd),
-                         self._run_if_confirmed)
+                         lambda c: self._run_if_confirmed(c, mount_for_write))
 
-    def _run_if_confirmed(self, cmd):
+    def _run_if_confirmed(self, cmd, mount_for_write=None):
         if cmd:
-            self._run(cmd)
+            self._run(cmd, mount_for_write)
 
     @work(thread=True, exclusive=True)
-    def _run(self, cmd) -> None:
-        self.call_from_thread(
-            self.query_one("#log", RichLog).write,
-            f"[b]koşuyor:[/b] {' '.join(cmd)}")
+    def _run(self, cmd, mount_for_write=None) -> None:
+        log = self.query_one("#log", RichLog)
         try:
-            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+            if mount_for_write:
+                domain, disk = mount_for_write
+                with sidemount.Mounted(domain, disk, rw=True,
+                                       log=lambda m: self.call_from_thread(
+                                           log.write, f"[dim]{m}[/dim]")) as mount:
+                    full = cmd + ["--offline", str(mount)]
+                    self.call_from_thread(log.write, f"[b]koşuyor:[/b] {' '.join(full)}")
+                    proc = subprocess.run(full, capture_output=True, text=True,
+                                          timeout=600)
+            else:
+                self.call_from_thread(log.write, f"[b]koşuyor:[/b] {' '.join(cmd)}")
+                proc = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
         except Exception as exc:                       # noqa: BLE001
-            self.call_from_thread(self.query_one("#log", RichLog).write,
-                                  f"[red]çalıştırılamadı:[/red] {exc}")
+            self.call_from_thread(log.write, f"[red]çalıştırılamadı:[/red] {exc}")
             return
         self.call_from_thread(self._run_done, proc.returncode,
                               proc.stdout or proc.stderr)
@@ -518,6 +590,10 @@ def main():
                         metavar="DOMAIN=MOUNT", default=[],
                         help="bu domain'i ajan yerine offline kovandan oku "
                              "(misafir KAPALI olmalı); tekrarlanabilir")
+    parser.add_argument("--no-auto-mount", action="store_true",
+                        help="kapalı misafirin diskini kendiliğinden bağlama")
+    parser.add_argument("--no-stop-bluetooth", action="store_true",
+                        help="`→ host` yazımında bluetoothd'yi durdurma")
     args = parser.parse_args()
     offline, offline_error = bondsync.parse_offline_specs(args.offline_specs)
     if offline_error:
@@ -533,7 +609,9 @@ def main():
     # görünür — bu depoda ödenmiş bir tuzak.
     if os.geteuid() != 0:
         sys.exit("TUI root ister (/var/lib/bluetooth 0700) — `sudo` ile çalıştırın")
-    BtbondTui(domains, args.root, args.usb_id, offline).run()
+    BtbondTui(domains, args.root, args.usb_id, offline,
+              automount=not args.no_auto_mount,
+              stop_bluetooth=not args.no_stop_bluetooth).run()
 
 
 if __name__ == "__main__":

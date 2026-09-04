@@ -288,5 +288,97 @@ async def t_parity():
 print("\n=== TUI: yetenek eşitliği (s / h) ===")
 run(t_parity())
 
+
+async def t_no_handover_for_host():
+    """`→ host` yazımı radyo host'tayken devir istemez: kapı stack-restart ile
+    geçer ve komuta `--stop-bluetooth` eklenir. Eski davranış DURDU idi."""
+    bondsync.survey_all = lambda *a, **k: survey([side(
+        "d1", [row("AA:BB:CC:DD:EE:01", bondsync.GUEST_ONLY, "to-host",
+                   guest={"LTK": "fp1"})],
+        radio_host=True, radio_guest=False)])
+    app = tui.BtbondTui(["d1"], "/tmp", "0000:0000")
+    pilot, driver = await boot(app)
+    try:
+        check("varsayılan: otomatik bağlama açık", app.automount, True)
+        check("varsayılan: bluetoothd durdurma açık", app.stop_bluetooth, True)
+        app.action_replicate()
+        await driver.pause()
+        check("host radyoyu tutarken onay ekranı AÇILDI (eskiden DURDU)",
+              isinstance(app.screen, tui.Confirm), True)
+        check("komut --stop-bluetooth taşıyor",
+              "--stop-bluetooth" in app.screen._command, True)
+        app.screen.dismiss(None)
+        await driver.pause()
+    finally:
+        await pilot.__aexit__(None, None, None)
+
+    # Kapatılabilir: --no-stop-bluetooth eski davranışı geri getirir.
+    app = tui.BtbondTui(["d1"], "/tmp", "0000:0000", stop_bluetooth=False)
+    pilot, driver = await boot(app)
+    try:
+        before = len(app.screen_stack)
+        app.action_replicate()
+        await driver.pause()
+        check("stop_bluetooth kapalıyken kapı yine DURUR", len(app.screen_stack), before)
+    finally:
+        await pilot.__aexit__(None, None, None)
+
+
+async def t_automounted_write():
+    """Otomatik bağlanmış tarafa yazım: komut mount'u ŞİMDİ değil, `_run`da
+    RW bağlanarak alır — onay ekranı bunu söyler."""
+    st = side("d1", [row("AA:BB:CC:DD:EE:01", bondsync.HOST_ONLY, "to-guest",
+                         host={"LTK": "fp1"})],
+              radio_host=True, radio_guest=False,
+              channel="offline: /run/btbond/d1/Windows/System32/config/SYSTEM")
+    st["automounted"] = True
+    st["disk"] = {"kind": "image", "path": "/imaj/d1.qcow2", "how": "domain XML"}
+    bondsync.survey_all = lambda *a, **k: survey([st])
+    app = tui.BtbondTui(["d1"], "/tmp", "0000:0000")
+    pilot, driver = await boot(app)
+    try:
+        app.action_replicate()
+        await driver.pause()
+        check("onay açıldı", isinstance(app.screen, tui.Confirm), True)
+        check("komutta henüz mount yok (RW bağlama _run'da)",
+              "--offline" in app.screen._command, False)
+        check("onay metni RW bağlanacağını söylüyor",
+              "RW bağlanacak" in app.screen._body, True)
+        app.screen.dismiss(None)
+        await driver.pause()
+    finally:
+        await pilot.__aexit__(None, None, None)
+
+
+async def t_read_empty_side():
+    """Okunmuş ama BOŞ taraf tablodan kaybolmaz: "bakıldı, bond yok" bir ölçümdür."""
+    empty = side("d2", [], channel="offline: /run/btbond/d2/…/SYSTEM")
+    empty["warnings"] = ["host ile misafirin adaptörü kesişmiyor"]
+    empty["adapter"] = None
+    bondsync.survey_all = lambda *a, **k: survey([
+        side("d1", [row("AA:BB:CC:DD:EE:01", bondsync.MATCH, None,
+                        host={"LTK": "f"}, guest={"LTK": "f"})]), empty])
+    app = tui.BtbondTui(["d1", "d2"], "/tmp", "0000:0000")
+    pilot, driver = await boot(app)
+    try:
+        table = app.query_one("#rows")
+        check("boş taraf da satır", table.row_count, 2)
+        check("hükmü OKUNDU — bond yok", table.get_row_at(1)[3], "OKUNDU — bond yok")
+        table.move_cursor(row=1)
+        app.action_detail()
+        await driver.pause()
+        check("ayrıntı çökmüyor", app.is_running, True)
+    finally:
+        await pilot.__aexit__(None, None, None)
+
+
+print("\n=== TUI: okunmuş ama boş taraf ===")
+run(t_read_empty_side())
+
+print("\n=== TUI: → host için devir gerekmiyor ===")
+run(t_no_handover_for_host())
+print("\n=== TUI: otomatik bağlanmış tarafa yazım ===")
+run(t_automounted_write())
+
 print(f"\nSONUÇ: {OK} geçti / {FAIL} başarısız")
 sys.exit(1 if FAIL else 0)

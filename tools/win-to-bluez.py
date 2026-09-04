@@ -21,17 +21,22 @@ Kullanım:
     sudo tools/win-to-bluez.py                      # yaz (varsayılan domain)
     tools/win-to-bluez.py --dry-run                 # yalnız yapıyı göster
     sudo tools/win-to-bluez.py --key-order reverse --force
+    sudo tools/win-to-bluez.py --offline /mnt/win   # kapalı misafirden topla
+    sudo tools/win-to-bluez.py --stop-bluetooth     # radyo host'tayken, devirsiz
 """
 
 import argparse
 import os
+import subprocess
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import bluezbond  # noqa: E402
 import winbond  # noqa: E402
 import agentexec  # noqa: E402
+import hivebond  # noqa: E402
 from agentexec import run_powershell  # noqa: E402
 
 fingerprint = winbond.fingerprint
@@ -107,13 +112,32 @@ def main():
     parser.add_argument("--dry-run", action="store_true", help="hiçbir şey yazma, yalnız yapıyı bas")
     parser.add_argument("--verify", action="store_true",
                         help="yazma; iki tarafın aynı anahtarı taşıdığını parmak iziyle doğrula")
+    # KAPALI MİSAFİRDEN TOPLAMA: kaynak ajan yerine mount edilmiş kovan.
+    # `bluez-to-win.py --offline`in aynası; kanal seçimi kaynağı değiştiriyor,
+    # hedef (host) aynı.
+    parser.add_argument("--offline", metavar="MOUNT",
+                        help="misafiri ajan yerine offline kovandan oku "
+                             "(mount kökü ya da SYSTEM kovanı; misafir KAPALI)")
+    # DEVİRSİZ HOST YAZIMI. BlueZ bond'ları adaptör kurulurken okur; adaptör
+    # host'tayken yazmak için eskiden radyoyu bir misafire verip geri almak
+    # gerekiyordu — yazılımsal bir problem için donanım devri. `bluetoothd`yi
+    # durdurup yazıp başlatmak aynı "kurulum" olayını üretir. SIRA ÖNEMLİ:
+    # yazımdan SONRA restart, koşan bluetoothd'nin dosyayı bellekten ezme
+    # riskini kaldırmaz; ÖNCE durdurmak kaldırır.
+    parser.add_argument("--stop-bluetooth", action="store_true",
+                        help="yazmadan önce `bluetoothd`yi durdur, sonra başlat "
+                             "(radyo host'tayken devirsiz yazım; host BT "
+                             "bağlantıları birkaç saniye düşer)")
     args = parser.parse_args()
 
-    exitcode, stdout, stderr = run_powershell(args.domain, winbond.DUMP_POWERSHELL)
-    if exitcode != 0:
-        sys.exit(f"misafir komutu exitcode={exitcode}\n{stderr}")
-
-    adapters, names, devices, _svc = winbond.collect(winbond.parse_dump(stdout))
+    if args.offline:
+        adapters, names, devices, _svc, meta = hivebond.read_bonds(args.offline)
+        print(f"offline kovan {meta['hive']}  ({meta['control_set']})")
+    else:
+        exitcode, stdout, stderr = run_powershell(args.domain, winbond.DUMP_POWERSHELL)
+        if exitcode != 0:
+            sys.exit(f"misafir komutu exitcode={exitcode}\n{stderr}")
+        adapters, names, devices, _svc = winbond.collect(winbond.parse_dump(stdout))
     if not adapters:
         sys.exit("misafirde hiç bond yok (Keys altında adaptör anahtarı bulunamadı)")
 
@@ -125,6 +149,67 @@ def main():
               else f"\n{problems} anahtar eşleşmiyor ya da host'ta yok.")
         sys.exit(1 if problems else 0)
 
+    if args.stop_bluetooth and not args.dry_run:
+        written = with_bluetooth_stopped(
+            lambda: replicate(adapters, names, devices, args, only))
+    else:
+        written = replicate(adapters, names, devices, args, only)
+
+    print(f"\n{written} info dosyası {'planlandı' if args.dry_run else 'yazıldı'}.")
+    if not args.dry_run and written and not args.stop_bluetooth:
+        print("BlueZ bunları yalnız adaptör kurulurken okur: radyo host'ta DEĞİLSE "
+              "geldiğinde okur; host'taysa `--stop-bluetooth` ile yazın.")
+
+
+def bluetoothctl_bonded():
+    """Host'un şu an bond'lu gördüğü MAC'ler — yazımın OKUNDUĞUNUN kanıtı."""
+    proc = subprocess.run(["bluetoothctl", "devices", "Bonded"],
+                          capture_output=True, text=True, timeout=30)
+    return {line.split()[1].upper() for line in proc.stdout.splitlines()
+            if line.startswith("Device ") and len(line.split()) >= 2}
+
+
+def with_bluetooth_stopped(work):
+    """`bluetoothd`yi durdur → `work()` → başlat — başlatma `finally`de.
+
+    Başlatma her durumda koşar: yazım düşerse bile Bluetooth kapalı KALMAZ.
+    Sonra `bluetoothctl devices Bonded` ile yazılanların gerçekten okunduğu
+    gösterilir; hüküm dosyanın varlığı değil, yığının onu görmesi.
+    """
+    before = bluetoothctl_bonded()
+    print("bluetoothd durduruluyor (host Bluetooth bağlantıları düşecek)…")
+    stop = subprocess.run(["systemctl", "stop", "bluetooth"],
+                          capture_output=True, text=True, timeout=60)
+    if stop.returncode != 0:
+        sys.exit(f"bluetoothd durdurulamadı: {stop.stderr.strip()}")
+    try:
+        return work()
+    finally:
+        start = subprocess.run(["systemctl", "start", "bluetooth"],
+                               capture_output=True, text=True, timeout=60)
+        if start.returncode != 0:
+            print(f"UYARI: bluetoothd BAŞLATILAMADI: {start.stderr.strip()} — "
+                  f"elle: `systemctl start bluetooth`")
+        else:
+            # ÖLÇÜLDÜ (2026-09-04): `start` döner dönmez sorulunca adaptör
+            # henüz kurulmamış oluyor ve sayı DÜŞÜK okunuyor (3 → 1), bir
+            # saniye sonra 3. Yani hemen okumak yanlış negatif üretir — durum
+            # okuması olayın bitmesini beklemez. Sayı en az eskisine ulaşana
+            # ya da bütçe bitene kadar yoklanır.
+            deadline = time.time() + 8
+            after = bluetoothctl_bonded()
+            while len(after) < len(before) and time.time() < deadline:
+                time.sleep(0.3)
+                after = bluetoothctl_bonded()
+            gained = sorted(after - before)
+            print(f"bluetoothd başlatıldı; bond'lu cihaz {len(before)} → {len(after)}"
+                  + (f", yeni: {', '.join(gained)}" if gained else "")
+                  + ("" if len(after) >= len(before)
+                     else "  UYARI: 8 sn'de eski sayıya dönmedi"))
+
+
+def replicate(adapters, names, devices, args, only):
+    """Misafir bond'larını host `info` dosyalarına yaz. Döner: yazılan sayısı."""
     written = 0
 
     for adapter, entry in sorted(adapters.items()):
@@ -174,11 +259,7 @@ def main():
                                   addr_code))
             written += bluezbond.write_info(args.root, adapter, dev, content,
                                             args.force, args.dry_run)
-
-    print(f"\n{written} info dosyası {'planlandı' if args.dry_run else 'yazıldı'}.")
-    if not args.dry_run and written:
-        print("BlueZ bunları yalnız adaptör kurulurken okur: "
-              "`systemctl restart bluetooth` (radyo host'ta olmalı).")
+    return written
 
 
 if __name__ == "__main__":
@@ -187,5 +268,5 @@ if __name__ == "__main__":
     # hata metnini çalıştırılabilir basar — yoksa traceback'e dönerdi.
     try:
         main()
-    except agentexec.AgentError as exc:
+    except (agentexec.AgentError, hivebond.HiveError) as exc:
         sys.exit(str(exc))

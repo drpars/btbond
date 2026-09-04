@@ -56,10 +56,12 @@ BTHPORT\Parameters` tam olarak SYSTEM'e açık bir anahtardır. Sonuç: misafiri
 **kapatmadan**, diski **rebind etmeden**, şifrelemeye **hiç dokunmadan**
 okunup yazılabiliyor.
 
-**Offline kovan** (`hivebond.py`) kapalı misafir ve dual boot için — **okuma ve
-yazma**. Zincir: domain kapalı → disk host'ta → bölüm mount → `hivex` →
-`ControlSet00N\Services\BTHPORT\Parameters`. Yazma yönü bugün yalnız
-Linux → Windows (`bluez-to-win.py --offline`); ters yön offline'a bağlanmadı.
+**Offline kovan** (`hivebond.py`) kapalı misafir ve dual boot için — **iki
+yönde de okuma ve yazma** (`bluez-to-win.py --offline`, `win-to-bluez.py
+--offline`). Zincir: domain kapalı → disk host'ta → bölüm mount → `hivex` →
+`ControlSet00N\Services\BTHPORT\Parameters`. Mount'u araç kendisi yapıyor
+(`sidemount.py`): disk keşfi + `qemu-nbd` + içerikle bölüm seçimi + garantili
+çözme → "TUI".
 
 Ajanın tek gerçek üstünlüğü **diske erişmek zorunda olmaması** — hız değil,
 çünkü koşan Windows'a yazılan anahtar da ancak `BTHPORT` sürücüsü başlarken
@@ -304,6 +306,18 @@ misafire `-EncodedCommand` ile gider ve Windows'un komut satırı sınırı aş�
 `guest-exec` *"Failed to execute helper program (Invalid argument)"* ile düşer;
 bu yüzden yazım partilere bölünür.
 
+```
+sudo tools/win-to-bluez.py --offline /mnt/win      # kapalı misafirden topla
+sudo tools/win-to-bluez.py --stop-bluetooth        # radyo host'tayken, devirsiz
+```
+
+`--stop-bluetooth` başlatmayı `finally`de yapar (yazım düşse bile Bluetooth
+kapalı kalmaz) ve sonra `bluetoothctl devices Bonded` ile yazılanların gerçekten
+okunduğunu gösterir — hüküm dosyanın varlığı değil, yığının onu görmesi.
+Ölçülmüş ayrıntı: `start` döner dönmez sorulunca adaptör henüz kurulmamış
+oluyor ve sayı **düşük** okunuyor (3 → 1, bir saniye sonra 3); araç eski sayıya
+dönene kadar yoklar.
+
 **Doğrulama** — iki tarafın aynı anahtar materyalini taşıdığını radyoyu
 oynatmadan söyler. Yönsüzdür: iki tarafı karşılaştırır, hangi yönde replike
 edildiğinden bağımsızdır. Karşılaştırma sha256'nın ilk 12 hex'i üzerinden yapılır,
@@ -395,12 +409,34 @@ değer ancak orada yan yana durur.
 
 | tuş | ne yapar |
 |---|---|
-| `r` | tazele (taraf başına ~1 sn) |
+| `r` | tazele (taraf başına ~1 sn ajan; kapalı taraf ~0,2 sn kovan) |
 | `d` | seçili satırın ayrıntısı (parmak izleri, adres tipi) |
 | `Enter` | satırın ima ettiği yönde replike et — kapıdan geçerse |
 | `s` | **topla + dağıt** (iki fazlı akış, kapsamın tamamı) |
-| `h` | **radyoyu devret** (seçili satırın domain'i) |
+| `h` | **radyoyu devret** — yalnız cihazları o tarafta *kullanmak* için |
 | `?` / `q` | yardım / çık |
+
+**İki kullanıcı dostu varsayılan, ikisi de kapatılabilir:**
+
+- **Kapalı misafir kendiliğinden bağlanıp okunur** (`--no-auto-mount` ile
+  kapatılır). Disk keşfediliyor (imaj XML'den, PCI passthrough sysfs'ten),
+  salt-okuma bağlanıyor, okunuyor, hemen çözülüyor. Yazım anında **RW yeniden
+  bağlanır**, bitince çözülür. Koşan VM'in diski **asla** bağlanmaz. Ölçüldü:
+  üç kapalı domain 0,5 sn — ajandan hızlı.
+- **`→ host` yazımı için radyo devri gerekmez** (`--no-stop-bluetooth` ile
+  kapatılır). Host radyoyu tutuyorsa `bluetoothd` **durdurulur → yazılır →
+  başlatılır**; adaptör yeniden kurulur ve anahtarları taze okur. Bedeli host
+  BT bağlantılarının birkaç saniye düşmesi — radyoyu bir VM'e verip geri
+  almanın yanında ucuz. Sıra önemli: yazımdan *sonra* restart, koşan
+  bluetoothd'nin dosyayı bellekten ezme riskini kaldırmaz; *önce* durdurmak
+  kaldırır.
+
+**Kapının asıl sorusu** bu yüzden *"hedef radyoyu tutuyor mu"* değil,
+*"bu yazımdan sonra hedef anahtarları TAZE okuyabilecek mi"* — ve bunun iki
+cevabı var: radyo sonradan gelir, ya da yığın yeniden başlar. Misafir tarafında
+yığını yeniden başlatmanın karşılığı (Windows BT cihazını PnP'den kapat/aç)
+**ölçülmedi**, o yüzden `→ misafir` için kaçış yok; ama orada normal durumda
+misafir radyoyu tutmuyor ve kapı zaten geçiyor.
 
 **Yetenek eşitliği — ölçüt "birebir aynı" değil.** Duruma bakarak verilen bir
 karar CLI'a özel kalmaz; bir *ölçüm kolu* ise CLI'da kalır. O yüzden TUI'de
@@ -413,24 +449,30 @@ yaptırmak olurdu.
 tıpkı onun yazıcıları çağırdığı gibi. Faz sırası, faz arası yeniden ölçüm ve
 devrin `vfioctl` çağrısı tek sahipte kalıyor.
 
-**Kapalı taraf da görünür, ve üç durum ayrı:**
+**Her taraf görünür, ve dört durum ayrı:**
 
 | satır | ne demek |
 |---|---|
 | `eşleşiyor` / `yalnız …` | taraf **okundu** (ajan ya da kovan) |
-| `ÖLÇÜLMEDİ (kapalı)` | taraf **var**, diski bulundu, içeriği okunmadı |
+| `OKUNDU — bond yok` | taraf okundu, eşleşmiş cihaz yok — bu bir **ölçüm** |
+| `ÖLÇÜLMEDİ (kapalı)` | taraf **var**, diski bulundu ama okunamadı (otomatik bağlama kapalı ya da düştü) |
 | `ULAŞILAMADI` | disk da bulunamadı |
 
-Ortadaki satır *"bond yok"* ile *"ölçmedim"*i ayırıyor, ve disk yolunu
-gösteriyor. Disk keşfi salt-okuma: imaj dosyası domain XML'inden, PCI
-passthrough ise `/sys/bus/pci/devices/<adres>/nvme/*/nvme*n*` üzerinden
-(bu makinede `0000:02:00.0` → `/dev/nvme1n1`, yalnız domain **kapalıyken**;
-koşarken cihaz `vfio-pci`'de). Kapsam: yalnız NVMe.
+*"Bond yok"* ile *"ölçmedim"* ayrı satırlar. Disk keşfi salt-okuma: imaj dosyası
+domain XML'inden, PCI passthrough `/sys/bus/pci/devices/<adres>/nvme/*/nvme*n*`
+üzerinden (bu makinede `0000:02:00.0` → `/dev/nvme1n1`, yalnız domain
+**kapalıyken**; koşarken cihaz `vfio-pci`'de). Kapsam: yalnız NVMe.
 
-**Mount otomatik DEĞİL, ve bilerek:** bağlama zinciri ayrıcalıklı ve durumlu
-(`qemu-nbd` + `partprobe` + `mount`), araç ortasında çökerse geriye bağlı bir
-nbd ve mount'lu bir dosya sistemi kalır. O yüzden araç tarafı **gösteriyor**,
-bağlamayı kullanıcı yapıyor ve `--offline DOMAIN=MOUNT` ile veriyor.
+**Mount zincirinin güvenceleri** (`sidemount.py`) — zincir ayrıcalıklı ve
+durumlu, araç ortasında ölürse geriye bağlı bir nbd ve mount'lu bir dosya
+sistemi kalır; o yüzden üç güvence, üçü zorunlu: (1) context manager, `__exit__`
+istisnada da koşar ve umount + disconnect'i **ayrı ayrı** dener; (2) her mount
+`/run/btbond/mounted.json`a **PID ile** yazılır, `/run` tmpfs olduğu için
+yeniden başlatmada kendiliğinden temizlenir, çökme sonrası `sidemount.py
+cleanup` ölü PID'lerin kayıtlarını çözer — canlı sürecinkine dokunmaz;
+(3) domain **kapalı değilse reddedilir**. Ölçüldü: gerçek blok aygıtı ve qcow2,
+istisna ortasında çözme, bayat kayıt temizliği, koşan-domain reddi — 19/19.
+Elle mount hâlâ mümkün: `--offline DOMAIN=MOUNT`.
 
 **Tazeleme açık ve bloklamıyor, çünkü ölçüldü:**
 
@@ -469,6 +511,10 @@ tests/test_emitters.py --update   # altın dosyayı KASITLI olarak yenile
 TUI testi arayüzün **kararlarını** ölçüyor, çizimini değil: hükümler modelden
 mi geliyor, kapı yıkıcı yolu kesiyor mu, `ANAHTAR FARKLI` kendiliğinden
 koşmuyor mu, ve yazımdan sonra tablo bayat işaretleniyor mu.
+
+`sidemount.py` bu pakette **değil**: gerçek disk, root ve `nbd` istiyor. Ölçümü
+elle yapıldı (2026-09-04, 19/19) ve arşivde kayıtlı; kapalı bir domain ile
+yeniden koşturulabilir.
 
 **Neden altın çıktı.** Yazma emitörleri artık PowerShell metni değil, yazma
 **işlemleri** (IR) üretiyor; renderer'lar onu metne çeviriyor. Ayrımın amacı
@@ -534,10 +580,12 @@ MIT → [LICENSE](LICENSE).
       arası yeniden ölçümle — tek döngülü biçim N≥2 tarafta yakınsamıyordu
 - [x] Offline taraf `status`ta ve TUI'de görünür (`--offline DOMAIN=MOUNT`),
       diski keşfediliyor, ve okunmamış taraf `ÖLÇÜLMEDİ` diye ayrılıyor
-- [ ] Mount otomasyonu (`qemu-nbd` + `mount` + garantili temizlik) — bugün
-      bağlamayı kullanıcı yapıyor
-- [ ] Ters yönde offline (`win-to-bluez --offline`) — offline taraf bugün
-      okunuyor ve yazılıyor, ama `→ host` yönünde toplanamıyor
+- [x] Mount otomasyonu (`sidemount.py`): keşif + `qemu-nbd` + içerikle bölüm
+      + garantili çözme; CLI ve TUI'de varsayılan
+- [x] Ters yönde offline (`win-to-bluez --offline`) — kapalı taraftan toplama
+- [x] `→ host` yazımında radyo devri yerine bluetoothd stop/start — kapı artık
+      "hedef taze okuyabilecek mi" diye soruyor
+- [ ] `→ misafir` için aynısı: Windows BT yığınını PnP'den kapat/aç (ölçülmedi)
 
 ## Bilinen boşluk
 

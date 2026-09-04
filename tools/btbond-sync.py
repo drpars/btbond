@@ -58,6 +58,7 @@ sys.path.insert(0, str(HERE))
 import bluezbond  # noqa: E402
 import bondsync  # noqa: E402
 import hcicapture  # noqa: E402
+import sidemount  # noqa: E402
 
 WRITER = {
     "to-host": HERE / "win-to-bluez.py",
@@ -97,7 +98,8 @@ def render(state):
     radio = state["radio"]
     lines = [
         f"domain {state['domain']}  |  adaptör {state['adapter'] or '(kesişim yok)'}"
-        f"  |  kanal {state.get('channel', '?')}",
+        f"  |  kanal {state.get('channel', '?')}"
+        f"{'  (otomatik bağlandı)' if state.get('automounted') else ''}",
         # Misafir sütunu HANGİ domain'i konuştuğunu söylüyor: tek domain
         # varsayan bir okuyucu, radyo başka bir domain'deyken basılan
         # `misafir=hayır`ı "radyo hiçbir misafirde değil" diye okur.
@@ -327,10 +329,19 @@ def run_phase(args, state, direction, blocked_devs=()):
 
     # KAPI — ölçüsü ve gerekçesi `bondsync.write_gate`de, TEK sahipte: aynı
     # kapıyı TUI de çağırıyor ve iki kopya tutulsaydı biri donardı.
-    allowed, reason = bondsync.write_gate(state["radio"], direction)
+    # `→ host` ve host radyoyu tutuyorsa bluetoothd durdurulup başlatılır
+    # (`--no-stop-bluetooth` verilmedikçe): yazılımsal probleme donanım devri
+    # dayatılmaz.
+    stop_bt = (direction == "to-host" and bool(state["radio"]["host"])
+               and not args.no_stop_bluetooth)
+    allowed, reason = bondsync.write_gate(state["radio"], direction,
+                                          stack_restart=stop_bt)
     if not allowed:
         print(f"  DURDU: {reason}")
         return 1
+    if stop_bt:
+        print("  bluetoothd yazım süresince duracak (host BT bağlantıları "
+              "birkaç saniye düşer), sonra yeniden başlatılıp okunacak.")
 
     # `--root` yazıcıya MUTLAKA geçer: geçmezse test kopyasına karşı
     # koşulan bir tur sessizce GERÇEK `/var/lib/bluetooth`a yazar —
@@ -346,6 +357,32 @@ def run_phase(args, state, direction, blocked_devs=()):
         cmd.append("--force")
     if args.dry_run:
         cmd.append("--dry-run")
+    if stop_bt:
+        cmd.append("--stop-bluetooth")
+
+    # OFFLINE TARAF: yazıcı kovana yazacak. Kullanıcı mount'u verdiyse o
+    # geçer; taraf otomatik bağlanmışsa (salt-okuma, çözülmüş) yazım için
+    # burada RW yeniden bağlanır ve yazıcı bitince çözülür.
+    user_mount = getattr(args, "_offline", {}).get(state["domain"])
+    if user_mount:
+        cmd += ["--offline", user_mount]
+        return _run_writer(cmd, args, state, direction)
+    if state.get("automounted"):
+        if args.dry_run:
+            print(f"  [dry-run] {state['domain']} yazım için RW bağlanacaktı "
+                  f"({state['disk']['path']})")
+            cmd += ["--offline", "<otomatik rw mount>"]
+            print(f"  {' '.join(cmd)}")
+            return 0
+        with sidemount.Mounted(state["domain"], state["disk"], rw=True,
+                               log=lambda m: print("  " + m)) as mount:
+            cmd += ["--offline", str(mount)]
+            return _run_writer(cmd, args, state, direction)
+    return _run_writer(cmd, args, state, direction)
+
+
+def _run_writer(cmd, args, state, direction):
+    """Yazıcıyı koştur; başarılıysa istenen devri yap. Döner: çıkış kodu."""
     print(f"  {' '.join(cmd)}")
     # Alt süreç terminale DOĞRUDAN yazıyor; kendi çıktımız tamponda
     # beklerse rapor yazıcının çıktısından SONRA görünür ve sıra
@@ -401,7 +438,9 @@ def run_phases(args, survey, domains, directions, offline=None):
             print("\n[yeniden ölçüm] fazlar arası: önceki faz host'u "
                   "değiştirmiş olabilir, sonraki faz taze durumla koşuyor.")
             sys.stdout.flush()
-            survey = bondsync.survey_all(domains, args.root, args.usb_id, offline)
+            survey = bondsync.survey_all(domains, args.root, args.usb_id, offline,
+                                         automount=not args.no_auto_mount
+                                         and os.geteuid() == 0, log=print)
         blocked = {item["dev"] for item in survey["cross"]}
         print(f"\n=== {PHASE_LABEL[direction]} ===")
         if blocked:
@@ -436,6 +475,16 @@ def main():
                         metavar="DOMAIN=MOUNT", default=[],
                         help="bu domain'i ajan yerine offline kovandan oku "
                              "(misafir KAPALI olmalı); tekrarlanabilir")
+    # KULLANICI DOSTU VARSAYILANLAR, ikisi de kapatılabilir:
+    #  - kapalı misafir otomatik bağlanır (salt-okuma, hemen çözülür;
+    #    `sidemount` garantili temizlik) — elle mount + `--offline` gerekmez.
+    #  - host radyoyu tutarken `→ host` yazımı için bluetoothd durdurulup
+    #    başlatılır — radyoyu bir misafire verip geri almak gerekmez.
+    parser.add_argument("--no-auto-mount", action="store_true",
+                        help="kapalı misafirin diskini kendiliğinden bağlama")
+    parser.add_argument("--no-stop-bluetooth", action="store_true",
+                        help="`→ host` yazımında bluetoothd'yi durdurma "
+                             "(o zaman radyo host'tayken yazım kapıda durur)")
     parser.add_argument("--direction", choices=("to-host", "to-guest"),
                         help="yalnız bu yöndeki satırları uygula (varsayılan: ikisi de)")
     parser.add_argument("--to", choices=("host", "guest"), dest="to_side",
@@ -516,7 +565,9 @@ def main():
                         capture_to, args.settle, args.root, args.keep_hci_log)
 
     # Ulaşılamayan taraf ATLANIR, döngüyü öldürmez → `bondsync.survey_all`.
-    survey = bondsync.survey_all(domains, args.root, args.usb_id, offline)
+    automount = not args.no_auto_mount and os.geteuid() == 0
+    survey = bondsync.survey_all(domains, args.root, args.usb_id, offline,
+                                 automount=automount, log=print)
 
     if args.command == "status":
         if args.json:
@@ -550,6 +601,7 @@ def main():
             print()
             print_mismatch_advice(side)
 
+    args._offline = offline
     exit_code = run_phases(args, survey, domains, directions, offline)
     if survey["cross"]:
         print(render_cross(survey["cross"]))
