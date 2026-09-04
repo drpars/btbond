@@ -65,19 +65,36 @@ from agentexec import run_powershell  # noqa: E402
 BATCH_BUDGET = 8000
 
 
-def batches(chunks, budget=BATCH_BUDGET):
-    """Parçaları, her partinin kaynak boyu bütçenin altında kalacak şekilde böl.
+def op_batches(chunks, budget=BATCH_BUDGET):
+    """İşlem listelerini, her partinin kaynak boyu bütçenin altında kalacağı
+    şekilde böl — **tek başına bütçeyi aşan parçayı da bölerek**.
 
-    Tek başına bütçeyi aşan bir parça yine de kendi partisinde gider — bölmek
-    kaydı yarım bırakırdı.
+    ÖLÇÜLMÜŞ ARIZA (2026-09-04): eski biçim parçalar ARASINDA bölüyordu ve
+    *"tek başına bütçeyi aşan bir parça yine de kendi partisinde gider"*
+    diyordu; sonuç, 6 profilli + 5 SDP kayıtlı gerçek bir BR/EDR cihazının
+    ajan kanalından **hiç yazılamaması** oldu. Ölçüm: o tek parça 10.629
+    kaynak karakteri, `WRITE_PRELUDE` ile 12.317, `-EncodedCommand` olarak
+    **32.848** — Windows'un 32.767 sınırının üstünde, yani `guest-exec`
+    *"Failed to execute helper program (Invalid argument)"* ile düşüyordu.
+    Arıza offline kanalda görünmüyor (hivex'in komut satırı yok), o yüzden
+    uzun süre fark edilmedi.
+
+    BÖLMEK ARTIK GÜVENLİ, ve sebebi ara temsil (`winbond.*_ops`): eskiden
+    parçalar opak METİNDİ ve bölmenin nereye düştüğü bilinemezdi; şimdi sınır
+    **op sınırı**. Sıra korunuyor, yani `Ensure-Key` önceki partide koşmuşsa
+    sonraki partinin `Set-*`i onu hazır bulur — partiler ardışık ve aynı
+    misafirde koşuyor. Sondaki `ECHO` son parçada kalır, yani başarı sayımı
+    (`OK ` satırları) değişmez.
     """
     batch, size = [], 0
     for chunk in chunks:
-        if batch and size + len(chunk) > budget:
-            yield batch
-            batch, size = [], 0
-        batch.append(chunk)
-        size += len(chunk)
+        for op in chunk:
+            cost = len(winbond.render_powershell([op])) + 1
+            if batch and size + cost > budget:
+                yield batch
+                batch, size = [], 0
+            batch.append(op)
+            size += cost
     if batch:
         yield batch
 
@@ -403,8 +420,8 @@ def main():
         return
 
     done = []
-    for batch in batches([winbond.render_powershell(chunk) for chunk in chunks]):
-        script = winbond.WRITE_PRELUDE + "\n" + "\n\n".join(batch) + "\n"
+    for batch in op_batches(chunks):
+        script = winbond.WRITE_PRELUDE + "\n" + winbond.render_powershell(batch) + "\n"
         exitcode, stdout, stderr = run_powershell(args.domain, script)
         if exitcode != 0:
             sys.exit(f"misafir yazma komutu exitcode={exitcode}\n{stderr}")

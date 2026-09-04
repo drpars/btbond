@@ -11,6 +11,7 @@ değiştirmez ve okuyan turu ikna eder.
 MAKİNEYE ÖZEL KİMLİK YOK: MAC'ler uydurma, anahtarlar dolgu. Depo public.
 """
 
+import base64
 import importlib.util
 import sys
 from pathlib import Path
@@ -242,6 +243,46 @@ try:
           ([agentexec.DEFAULT_DOMAIN], True))
 finally:
     agentexec.discover_domains = _real_discover
+
+print("ajan taşıyıcısı — Windows komut satırı sınırı")
+
+# ÖLÇÜLMÜŞ ARIZA (2026-09-04): partileme parçalar ARASINDA bölüyordu ve tek
+# başına bütçeyi aşan parçayı **bilerek** bölmüyordu. Sonuç: 6 profilli + 5 SDP
+# kayıtlı gerçek bir BR/EDR cihazı ajan kanalından HİÇ yazılamıyordu —
+# `-EncodedCommand` 32.848 karakter, Windows'un 32.767 sınırının üstünde, ve
+# `guest-exec` "Failed to execute helper program (Invalid argument)" veriyordu.
+# Offline kanalda görünmüyordu (hivex'in komut satırı yok), o yüzden arıza
+# aylarca sessiz kaldı. Bölmek ara temsil (`*_ops`) geldikten sonra güvenli.
+_b2w_spec = importlib.util.spec_from_file_location("bluez_to_win",
+                                                   TOOLS / "bluez-to-win.py")
+bluez_to_win = importlib.util.module_from_spec(_b2w_spec)
+_b2w_spec.loader.exec_module(bluez_to_win)
+
+small = [(winbond.KEY, r"\Y"), (winbond.ECHO, "OK bredr small")]
+big = ([(winbond.KEY, r"\X")]
+       + [(winbond.DW, r"\X", f"Field{i:03}", i) for i in range(60)]
+       + [(winbond.ECHO, "OK record big")])
+
+parts = list(bluez_to_win.op_batches([small, big], budget=400))
+check("tek başına bütçeyi aşan parça BÖLÜNÜYOR", len(parts) > 1, True)
+flat = [op for part in parts for op in part]
+check("op korunumu: sayı", len(flat), len(small) + len(big))
+check("op korunumu: SIRA", flat, small + big)
+check("her parti bütçenin altında",
+      max(len(winbond.render_powershell(part)) for part in parts) <= 400, True)
+# Sondaki `ECHO`lar korunmalı: başarı sayımı stdout'taki `OK ` satırlarını okuyor,
+# yani düşen bir ECHO "yazım eksik" değil "yazım olmamış" gibi görünürdü.
+check("ECHO'lar korunuyor",
+      [op for op in flat if op[0] == winbond.ECHO], [small[1], big[-1]])
+
+# Bütçe KAYNAK karakteri sayıyor; Windows'un baktığı şey UTF-16LE+base64
+# uzunluğu. Sözleşme gerçek sınıra göre yazılıyor, ara birime göre değil.
+worst = max(
+    len(base64.b64encode(
+        (winbond.WRITE_PRELUDE + "\n" + winbond.render_powershell(part) + "\n")
+        .encode("utf-16-le")).decode())
+    for part in bluez_to_win.op_batches([small, big]))
+check("varsayılan bütçede kodlanmış boy 32767'nin ALTINDA", worst < 32767, True)
 
 print(f"\nSONUÇ: {OK} geçti / {FAIL} başarısız")
 sys.exit(1 if FAIL else 0)
