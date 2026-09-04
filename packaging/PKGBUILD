@@ -7,15 +7,22 @@
 # özel olanlar `optdepends`ta ve orada NE İÇİN gerektikleri yazılı — kurulu
 # olmadıklarında araç susmuyor, eksikliği söylüyor.
 #
-# HENÜZ KOŞTURULMADI, ve sebebi burada yazılı olsun: `source` bir sürüm
-# etiketine bakıyor (`v0.1.0`) ve depoda **hiç etiket yok** (ölçüldü
-# 2026-09-04), yani `makepkg` bu hâliyle indiremez. Etiket atılınca
-# `sha256sums` da `SKIP` olmaktan çıkarılmalı. Yerelden denemek için `source`
-# yerine `git+file:///home/…/btbond` kullanılabilir.
+# KOŞTURULDU (2026-09-04, bu makine): `makepkg -f` temiz bitti, `check()`
+# içinde dört test paketi de geçti (65 + 28 + 53 + altın çıktı), çıktı
+# `btbond-0.1.0-1-any.pkg.tar.zst` ve içinde `/usr/bin/btbond` var. Paketin
+# boyu buraya YAZILMIYOR: iki ardışık derleme 10 bayt farkla çıktı, yani
+# sabit değil.
 #
-# Build ve package adımlarının aletleri de bu makinede kurulu DEĞİL
-# (`python-build`, `python-installer`); wheel'in kendisi `pip install .` ile
-# üretilip temiz bir venv'de sınandı, ama `makepkg` yolu koşturulmadı.
+# `source` bir sürüm ETİKETİNE bakıyor, dala değil: `pkgver`in bir şeye
+# karşılık gelmesi için kaynağın değişmez olması gerekiyor — dal ilerler,
+# etiket ilerlemez. Etiket yokken `makepkg` indiremiyordu (ölçüldü: depoda
+# sıfır etiket), `v0.1.0` o yüzden atıldı.
+#
+# `sha256sums` GitHub'ın KENDİ ÜRETTİĞİ arşiv tarball'ının özeti. Bu biçimin
+# bayt kararlılığı GitHub tarafından garanti edilmiyor; özet bir gün tutmazsa
+# çare hash'i güncellemek değil, kaynağı etikete adresli git'e çevirmektir:
+#   source=("$pkgname::git+$url.git#tag=v$pkgver")  + makedepends 'git'
+# (o biçimde `sha256sums=('SKIP')` doğrudur, çünkü doğrulamayı etiket yapar).
 
 pkgname=btbond
 pkgver=0.1.0
@@ -35,7 +42,7 @@ optdepends=(
   'vfioctl: radyoyu devretmek (`btbond handover`)'
 )
 source=("$pkgname-$pkgver.tar.gz::$url/archive/v$pkgver.tar.gz")
-sha256sums=('SKIP')
+sha256sums=('3c855b39c863d1029f61a9684f5619e57d91225b1aab00d0d2f3d38a65009fd9')
 
 build() {
   cd "$srcdir/$pkgname-$pkgver"
