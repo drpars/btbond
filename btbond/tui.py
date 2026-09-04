@@ -51,6 +51,7 @@ from . import bondsync
 from . import sidemount
 from .runner import self_command
 
+from rich.text import Text  # noqa: E402
 from textual import work  # noqa: E402
 from textual.app import App, ComposeResult  # noqa: E402
 from textual.binding import Binding  # noqa: E402
@@ -78,10 +79,37 @@ VERDICT_LABEL = {
     bondsync.KEY_MISMATCH: "ANAHTAR FARKLI",
 }
 
+# HÜKÜM RENGİ — ve bu kozmetik DEĞİL: `ANAHTAR FARKLI` bu tabloda yıkıcı olan
+# tek satır (Enter'ı iki parmak izli bir soruya çıkarır, `--force` yazar) ve
+# renksiz tabloda `eşleşiyor` ile aynı ağırlıkta duruyordu. Renk tek taşıyıcı
+# değil: metin de yön oku da yerinde kalıyor, yani renk körlüğünde hüküm hâlâ
+# okunur — renk yalnız tarama hızını veriyor.
+#
+# ANSI adları BİLEREK: terminalin kendi paletine bağlanırlar, yani kullanıcının
+# temasıyla birlikte gelirler. Sabit RGB seçmek koyu temada ölçülü görünüp açık
+# temada okunmaz hâle gelirdi.
+VERDICT_STYLE = {
+    bondsync.MATCH: "dim",              # iş yok — göz buraya takılmasın
+    bondsync.HOST_ONLY: "cyan",         # → misafir
+    bondsync.GUEST_ONLY: "green",       # → host
+    bondsync.KEY_MISMATCH: "bold red",  # yıkıcı, ve kendiliğinden ÇÖZÜLMEZ
+}
+
+# Taraf satırları hüküm değil DURUM taşıyor; üçü de birbirinden ayrı okunmalı,
+# çünkü "ölçmedim" ile "baktım, yok" aynı görünürse tablo yalan söyler.
+SIDE_STYLE = {
+    "unmeasured": "yellow",     # taraf var, içeriği okunmadı
+    "unreachable": "bold red",  # diski bile bulunamadı
+    "empty": "dim",             # okundu ve boş — olumlu bir ölçüm
+}
+
+# Taraflar arası ayrışma: satırın hükmünden AYRI bir uyarı, o yüzden ayrı renk.
+CROSS_STYLE = "bold yellow"
+
 ARROW = {"to-host": "→ host", "to-guest": "→ misafir", None: ""}
 
 HELP = """\
-[b]btbond TUI — diff görünümü[/b]
+[b]Bu ekran bir diff görünümü, bir yön sihirbazı değil.[/b]
 
   r        tazele (taraf başına ~1 sn: misafir yarısı bir guest-exec turu)
   d        seçili satırın ayrıntısı (parmak izleri, teknoloji, adres tipi)
@@ -107,11 +135,11 @@ HELP = """\
   her taraftan host'a topla, sonra host'tan kapsama dağıt. Fazlar arasında
   yeniden ölçülür — yoksa ikinci fazın girdisi bayat olur.
 
-[b]Hükümler[/b]
-  eşleşiyor          iki taraf aynı anahtar materyalini taşıyor, iş yok
-  yalnız host'ta     → misafir yönünde kopyalanır
-  yalnız misafirde   → host yönünde kopyalanır
-  ANAHTAR FARKLI     kendiliğinden ÇÖZÜLMEZ; Enter iki parmak izini gösterip
+[b]Hükümler[/b]  (tablodaki renklerin aynısı)
+  [dim]eşleşiyor[/dim]          iki taraf aynı anahtar materyalini taşıyor, iş yok
+  [cyan]yalnız host'ta[/cyan]     → misafir yönünde kopyalanır
+  [green]yalnız misafirde[/green]   → host yönünde kopyalanır
+  [bold red]ANAHTAR FARKLI[/bold red]     kendiliğinden ÇÖZÜLMEZ; Enter iki parmak izini gösterip
                      sorar, çünkü hangi tarafın yeni olduğu ölçülemiyor ve
                      yanlış seçim çalışan bir bond'u yok eder
 
@@ -119,10 +147,15 @@ HELP = """\
   Yönü veri söylüyor. Global bir yön kipi, tam o tek belirsizlikte yeniyi
   eskiyle sessizce ezerdi.
 
-[b]AYRIŞMA işareti[/b]
+[b][bold yellow]+AYRIŞMA[/bold yellow] işareti[/b]
   Aynı cihazın anahtarı taraflar arasında farklı. Çevre birim TEK anahtar
   tutar (en son eşleştirmeninkini), yani tek başına duran taraf çalışan tek
   taraf olabilir — ama bu bir oy değil: hakem cihazı o an bağlayabilen taraf.
+
+[b]Taraf satırları[/b]
+  [yellow]ÖLÇÜLMEDİ (kapalı)[/yellow]  taraf var, içeriği okunmadı
+  [bold red]ULAŞILAMADI[/bold red]         diski de bulunamadı
+  [dim]OKUNDU — bond yok[/dim]    bakıldı: bu tarafta eşleşmiş cihaz yok
 """
 
 
@@ -139,7 +172,10 @@ class Help(ModalScreen):
     BINDINGS = [Binding("escape,q,question_mark", "dismiss", "kapat")]
 
     def compose(self) -> ComposeResult:
-        yield VerticalScroll(Static(HELP, id="helptext"), id="helpbox")
+        box = VerticalScroll(Static(HELP, id="helptext"), id="helpbox")
+        box.border_title = "btbond — yardım"
+        box.border_subtitle = "↑ ↓ PgUp PgDn kaydırır · q / Esc kapatır"
+        yield box
 
 
 class Confirm(ModalScreen):
@@ -148,7 +184,18 @@ class Confirm(ModalScreen):
     Komutun görünmesi tercih değil gereklilik: bu ekranda verilen `evet`
     yıkıcı bir yazımı başlatıyor, ve kullanıcının onayladığı şeyin ne olduğu
     ekranda durmalı.
+
+    AÇILIŞ ODAĞI **VAZGEÇ**, ve bu ölçülmüş bir kusurun düzeltmesi
+    (2026-09-04, Textual 8.2.8): varsayılan otomatik odak ilk odaklanabilir
+    widget'a düşüyordu, yani ekran `Çalıştır` (`variant="error"`) **odakta**
+    açılıyordu — ölçüldü, `screen.focused.id == "run"`. Tabloda `enter`
+    öncelikli bağlı olduğu için iki ardışık `enter` onay metnini hiç okumadan
+    yıkıcı yazımı başlatıyordu. Bu, deponun `on_data_table_row_selected`i
+    bilerek reddetme gerekçesinin (tek tıklama yazım başlatmasın) aynısı;
+    orada kapatılan kapı burada açık kalmıştı.
     """
+
+    AUTO_FOCUS = "#cancel"
 
     BINDINGS = [Binding("escape", "dismiss(None)", "vazgeç")]
 
@@ -157,14 +204,19 @@ class Confirm(ModalScreen):
         self._title, self._body, self._command = title, body, command
 
     def compose(self) -> ComposeResult:
-        yield Vertical(
-            Static(f"[b]{self._title}[/b]", classes="mtitle"),
+        box = Vertical(
             Static(self._body, classes="mbody"),
-            Static(f"[dim]{' '.join(str(c) for c in self._command)}[/dim]",
+            # `markup=False`: komut metni KULLANICI VERİSİ taşıyor (yol, domain
+            # adı, MAC). İçindeki bir `[…]` markup sanılırsa onay ekranında
+            # gösterilen komut, koşacak komuttan sessizce ayrılır.
+            Static(" ".join(str(c) for c in self._command), markup=False,
                    classes="mcmd"),
             Horizontal(Button("Çalıştır", variant="error", id="run"),
                        Button("Vazgeç", id="cancel")),
             id="confirmbox")
+        box.border_title = self._title
+        box.border_subtitle = "Esc = vazgeç"
+        yield box
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         self.dismiss(self._command if event.button.id == "run" else None)
@@ -176,7 +228,12 @@ class Resolve(ModalScreen):
     Otomatik çözüm YOK: hangi tarafın yeni olduğu ölçülemiyor. Soru tam bu
     anda sorulur çünkü karar verebilmek için gereken iki değer ancak burada
     yan yana duruyor.
+
+    Açılış odağı **Vazgeç** — gerekçe `Confirm`inkiyle aynı, ve burada daha
+    ağır: iki yazma düğmesi de `--force` yolunu açıyor.
     """
+
+    AUTO_FOCUS = "#cancel"
 
     BINDINGS = [Binding("escape", "dismiss(None)", "vazgeç")]
 
@@ -189,21 +246,30 @@ class Resolve(ModalScreen):
         lines = [f"[b]{row['dev']}  {row['name']}[/b]",
                  f"farklı alanlar: {', '.join(row['differing']) or '(ortak anahtar yok)'}",
                  ""]
-        for side, label in (("host", "host"), ("guest", f"misafir ({self._domain})")):
+        # İKİ PARMAK İZİ AYNI SÜTUNDA BAŞLAR. Bu ekranın tek işi onları
+        # karşılaştırmak, ve etiketler farklı uzunlukta ("host" ↔ "misafir
+        # (win11-nvme)") — sabit boşlukla yazılınca değerler kayıyor ve göz
+        # ilk farklı karakteri bulmak için satır başı arıyor.
+        labels = {"host": "host", "guest": f"misafir ({self._domain})"}
+        column = max(len(text) for text in labels.values()) + 2
+        for side, label in (("host", labels["host"]), ("guest", labels["guest"])):
             prints = row[side]
             shown = "  ".join(f"{k}={v}" for k, v in sorted(prints.items())) if prints \
                 else "(yok)"
-            lines.append(f"[b]{label}[/b]  {shown}")
+            lines.append(f"[b]{label}[/b]" + " " * (column - len(label)) + shown)
         lines += ["",
                   "Cihaz TEK anahtar tutar — en son eşleştirmeninkini. Yani",
                   "tek başına duran taraf çalışan tek taraf OLABİLİR; bu bir oy",
                   "değil, hakem cihazı O AN bağlayabilen taraftır."]
-        yield Vertical(
+        box = Vertical(
             Static("\n".join(lines), classes="mbody"),
             Horizontal(Button("host'u misafire yaz", variant="error", id="to-guest"),
                        Button("misafiri host'a yaz", variant="error", id="to-host"),
                        Button("Vazgeç", id="cancel")),
             id="resolvebox")
+        box.border_title = "ANAHTAR FARKLI — seçim sizin"
+        box.border_subtitle = "yanlış seçim çalışan bir bond'u yok eder · Esc = vazgeç"
+        yield box
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         self.dismiss(None if event.button.id == "cancel" else event.button.id)
@@ -212,6 +278,8 @@ class Resolve(ModalScreen):
 class HandoverTarget(ModalScreen):
     """Radyo nereye gitsin? Bu bir NİYET sorusu, ölçüm değil."""
 
+    AUTO_FOCUS = "#cancel"          # gerekçe → `Confirm.__doc__`
+
     BINDINGS = [Binding("escape", "dismiss(None)", "vazgeç")]
 
     def __init__(self, domain):
@@ -219,14 +287,16 @@ class HandoverTarget(ModalScreen):
         self._domain = domain
 
     def compose(self) -> ComposeResult:
-        yield Vertical(
-            Static(f"[b]Radyoyu devret — {self._domain}[/b]", classes="mtitle"),
+        box = Vertical(
             Static("Radyonun NEREDE olduğu ölçülüyor; NEREYE gideceği "
                    "ölçülemez, o yüzden sorulur.", classes="mbody"),
             Horizontal(Button("host'a", variant="warning", id="host"),
                        Button("misafire", variant="warning", id="guest"),
                        Button("Vazgeç", id="cancel")),
             id="confirmbox")
+        box.border_title = f"Radyoyu devret — {self._domain}"
+        box.border_subtitle = "Esc = vazgeç"
+        yield box
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         self.dismiss(None if event.button.id == "cancel" else event.button.id)
@@ -236,20 +306,56 @@ class BtbondTui(App):
     """Tek ekran: başlıkta radyonun yeri + ölçüm saati, gövdede satırlar."""
 
     CSS = """
-    #band { padding: 0 1; }
-    #stale { padding: 0 1; color: $warning; }
-    DataTable { height: 1fr; }
-    RichLog { height: 10; border-top: solid $primary; }
+    /* ÖLÇÜM BANDI — başlığın altındaki durum çubuğu. Panel zemini onu
+       tablodan ayırıyor, çünkü söylediği şey satırların değil EKRANIN
+       durumu: radyo nerede, veri hangi saatte ölçüldü. */
+    #band { padding: 0 1; background: $panel; }
+
+    /* BAYAT UYARISI — tazeyken YER KAPLAMAZ, yazımdan sonra tam genişlikte
+       bir şerit olur (`display` Python'dan çevriliyor). Sönük bir metin
+       satırı olarak durduğunda bandın gürültüsüne karışıyordu, oysa
+       söylediği şey "ekranda duran veri artık yanlış". */
+    #stale {
+        display: none; padding: 0 1;
+        background: $warning; color: auto; text-style: bold;
+    }
+
+    /* Yatay çubuk 1 satır ve SÖNÜK: varsayılan hâlinde ekranın en parlak
+       öğesiydi, oysa taşıdığı bilgi en az olan — "içerik ekrandan geniş".
+       Kaldırılmıyor, çünkü o bilgi gerçek: `ad` sütunu kırpılıyor. */
+    DataTable {
+        height: 1fr; scrollbar-size-horizontal: 1;
+        scrollbar-background: $surface; scrollbar-color: $panel-lighten-2;
+        scrollbar-color-hover: $accent; scrollbar-color-active: $accent;
+    }
+    DataTable > .datatable--header { text-style: bold; }
+
+    /* Günlük başlıklı bir çerçevede: başlıksız hâlinde tablonun devamı gibi
+       okunuyordu, oysa içeriği ayrı — koşan komutlar ve çıktıları. */
+    RichLog { height: 10; border-top: solid $primary; padding: 0 1; }
+
+    /* Kipler ORTADA. Ölçüldü (2026-09-04, Textual 8.2.8): hizalama
+       verilmeyince onay kutusu `Region(x=0, y=0)` ile sol üst köşeye
+       yapışıyordu — 112 sütunluk ekranda 84 sütunluk bir kutu, arkasındaki
+       tabloyla aynı hizada başlayınca ekranın bir parçası gibi okunuyor. */
+    ModalScreen { align: center middle; }
+
+    /* Kipler: başlık ARTIK KENARLIKTA (`border_title`), gövdenin ilk satırı
+       değil — kutunun neyi sorduğu kaydırılsa da görünür kalıyor. */
     #helpbox, #confirmbox, #resolvebox {
         width: 84; height: auto; max-height: 90%;
-        border: thick $primary; background: $surface; padding: 1 2;
+        border: round $primary; background: $surface; padding: 1 2;
     }
     /* Yardım tavana dayanınca KESİLMEZ, kaydırılır (→ `Help` docstring'i).
        Çubuk aynı zamanda "devamı var" işaretidir. */
     #helpbox { overflow-y: auto; scrollbar-size-vertical: 1; }
-    .mtitle { padding-bottom: 1; }
     .mbody { padding-bottom: 1; }
-    .mcmd { padding-bottom: 1; }
+    /* Çalıştırılacak komut: onayın konusu bu, o yüzden kendi kutusunda ve
+       taşarsa kırpılmıyor — kaydırılıyor. */
+    .mcmd {
+        padding: 0 1; margin-bottom: 1; overflow-x: auto;
+        background: $boost; color: $text-muted;
+    }
     Horizontal { height: auto; align: center middle; }
     Button { margin: 0 1; }
     """
@@ -290,13 +396,20 @@ class BtbondTui(App):
         self.rows = []              # tablo satırı -> (domain, row) eşlemesi
 
     def compose(self) -> ComposeResult:
-        yield Header()
+        # Saat BİLEREK açık: bandın söylediği "ölçüm 14:03:11" ancak şu ana
+        # göre bir yaş taşır, ve bu ekranda veri taraf başına ~1 sn'lik bir
+        # turla geliyor — yani hep geçmişten.
+        yield Header(show_clock=True)
         yield Static("ölçülüyor…", id="band")
         yield Static("", id="stale")
         table = DataTable(id="rows", cursor_type="row", zebra_stripes=True)
-        table.add_columns("taraf", "cihaz", "tek", "hüküm", "yön", "ad")
+        # "tür" iki şey taşıyor ve ikisi de bir tür: bond satırında teknoloji
+        # (LE / BR/EDR), taraf satırında diskin cinsi (image / partition).
+        table.add_columns("taraf", "cihaz", "tür", "hüküm", "yön", "ad")
         yield table
-        yield RichLog(id="log", markup=True, wrap=True)
+        log = RichLog(id="log", markup=True, wrap=True)
+        log.border_title = "günlük"
+        yield log
         yield Footer()
 
     def on_mount(self) -> None:
@@ -324,6 +437,9 @@ class BtbondTui(App):
         self.call_from_thread(self._measure_done, survey, time.time() - started)
 
     def _measure_failed(self, message):
+        # Yükleniyor durumu BURADA da kapanmalı: açık kalırsa ekran ölçüm hâlâ
+        # sürüyormuş gibi görünür ve hata yalnız bantta kalır.
+        self.query_one("#rows", DataTable).loading = False
         self.query_one("#band", Static).update(f"[red]ölçüm başarısız:[/red] {message}")
         self.query_one("#log", RichLog).write(f"[red]ölçüm başarısız[/red] {message}")
 
@@ -339,27 +455,37 @@ class BtbondTui(App):
 
         # Radyonun yeri BAŞLIKTA duruyor, çünkü neyin koşulabilir olduğunu o
         # belirliyor — kapının girdisi bu.
-        bands = []
+        # OKUNAMAYAN TARAF BANTTA SAYILIR, ANLATILMAZ: hangisi ve neden
+        # okunamadığı tabloda kendi renkli satırında duruyor (ÖLÇÜLMEDİ ↔
+        # ULAŞILAMADI). Aynı olguyu iki yere yazmak, biri ilerleyince
+        # öbürünü sessizce yanlış yapar — üstelik ölçüldü ki bandı taşıran
+        # şey buydu: üç taraflı kapsamda bant 110 sütuna sığmayıp **iki
+        # satıra** sarıyordu (2026-09-04).
+        bands, unread = [], 0
         for side in survey["sides"]:
             if "error" in side:
-                # ÜÇ DURUM: taraf var ama ölçülmedi ↔ gerçekten ulaşılamadı.
-                mark = "ÖLÇÜLMEDİ" if side.get("disk") else "ULAŞILAMADI"
-                colour = "yellow" if side.get("disk") else "red"
-                bands.append(f"[{colour}]{side['domain']}: {mark}[/{colour}]")
-            else:
-                channel = "kovan" if side.get("channel", "").startswith("offline") \
-                    else "ajan"
-                if side.get("automounted"):
-                    channel += ", otomatik bağlandı"
-                bands.append(f"{side['domain']} ({channel}): "
-                             f"radyo {side['radio']['where']}")
+                unread += 1
+                continue
+            channel = "kovan" if side.get("channel", "").startswith("offline") \
+                else "ajan"
+            if side.get("automounted"):
+                channel += ", otomatik bağlandı"
+            bands.append(f"{side['domain']} ({channel}): "
+                         f"radyo {side['radio']['where']}")
+        if unread:
+            bands.append(f"[yellow]{unread} taraf okunamadı[/yellow] (tabloda)")
         took = f"  ({elapsed:.2f} sn)" if elapsed is not None else ""
         self.query_one("#band", Static).update(
             f"ölçüm {self.measured_at}{took}  |  " + "  |  ".join(bands))
-        self.query_one("#stale", Static).update(
-            "TABLO BAYAT: yazım yapıldı, `r` ile yeniden ölç." if self.stale else "")
+        # Şerit tazeyken YER KAPLAMIYOR (CSS'te `display: none`), bayatken
+        # görünür oluyor — "uyarı yok" ile "uyarı var" arasındaki fark bir
+        # rengin tonu değil, satırın varlığı.
+        stale = self.query_one("#stale", Static)
+        stale.update("TABLO BAYAT: yazım yapıldı, `r` ile yeniden ölç.")
+        stale.display = self.stale
 
         table = self.query_one("#rows", DataTable)
+        table.loading = False
         table.clear()
         self.rows = []
         for side in survey["sides"]:
@@ -370,10 +496,13 @@ class BtbondTui(App):
                 disk = side.get("disk")
                 if disk:
                     table.add_row(side["domain"], disk["path"], disk["kind"],
-                                  "ÖLÇÜLMEDİ (kapalı)", "",
+                                  Text("ÖLÇÜLMEDİ (kapalı)",
+                                       style=SIDE_STYLE["unmeasured"]), "",
                                   f"--offline {side['domain']}=<mount> ile okunur")
                 else:
-                    table.add_row(side["domain"], "—", "—", "ULAŞILAMADI", "",
+                    table.add_row(side["domain"], "—", "—",
+                                  Text("ULAŞILAMADI",
+                                       style=SIDE_STYLE["unreachable"]), "",
                                   side["error"][:58])
                 continue
             if not side["rows"]:
@@ -381,19 +510,44 @@ class BtbondTui(App):
                 # tablodan kaybolur ve "ölçülmedi" ile karışır — oysa bu bir
                 # olumlu ölçüm: bakıldı, bond yok.
                 self.rows.append((side["domain"], None))
-                table.add_row(side["domain"], "—", "—", "OKUNDU — bond yok", "",
+                table.add_row(side["domain"], "—", "—",
+                              Text("OKUNDU — bond yok", style=SIDE_STYLE["empty"]),
+                              "",
                               (side["warnings"][0][:58] if side["warnings"]
                                else "bu tarafta eşleşmiş cihaz yok"))
                 continue
             for row in side["rows"]:
-                verdict = VERDICT_LABEL[row["verdict"]]
+                style = VERDICT_STYLE[row["verdict"]]
+                verdict = Text(VERDICT_LABEL[row["verdict"]], style=style)
                 if row["dev"] in blocked:
-                    verdict += " +AYRIŞMA"
+                    # Ayrışma hükmün PARÇASI değil, üstüne binen bir uyarı —
+                    # o yüzden kendi rengini taşıyor.
+                    verdict.append(" +AYRIŞMA", style=CROSS_STYLE)
                 self.rows.append((side["domain"], row))
                 table.add_row(side["domain"], row["dev"], row["tech"], verdict,
-                              ARROW[row["direction"]], row["name"])
+                              Text(ARROW[row["direction"]], style=style),
+                              row["name"])
         if not self.rows:
             self.query_one("#log", RichLog).write("karşılaştırılacak bond yok.")
+
+    def check_action(self, action, parameters):
+        """`enter` bağı KİP EKRANI AÇIKKEN devre dışı.
+
+        ÖLÇÜLDÜ (2026-09-04, Textual 8.2.8): `priority=True` bağ uygulama
+        düzeyinde olduğu için **her** ekranda ateşliyor — onay kutusu
+        açıkken basılan `enter` kutuyu kapatmıyor, üstüne **ikinci bir
+        onay kutusu** yığıyordu (`screen_stack` → `[Screen, Confirm,
+        Confirm]`). Öncelikli olmayan bağlar (`r`, `s`, `h`, `d`, `?`) aynı
+        turda ölçüldü ve sızmıyor: kip onları zaten kesiyor, yani düzeltmesi
+        gereken tek bağ bu.
+
+        `False` dönmek bağı eşleşmez kılıyor, yani tuş kipin kendi odaklı
+        düğmesine ULAŞIYOR — eylemi sessizce yutmak yerine doğru sahibine
+        veriyor.
+        """
+        if action == "replicate" and len(self.screen_stack) > 1:
+            return False
+        return True
 
     def _selected(self):
         """Seçili satır → `(domain, row)`; atlanan taraf satırında `row` None."""
@@ -408,6 +562,9 @@ class BtbondTui(App):
     def action_refresh_survey(self) -> None:
         self.query_one("#band", Static).update(
             f"ölçülüyor… ({len(self.domains)} taraf × ~1 sn)")
+        # Tablo ÖLÇÜM BOYUNCA yükleniyor durumunda: eski satırlar ekranda
+        # kalırsa taze sanılırlar, ve tur taraf başına ~1 sn sürüyor.
+        self.query_one("#rows", DataTable).loading = True
         self._measure()
 
     def action_help(self) -> None:
