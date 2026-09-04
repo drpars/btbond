@@ -56,7 +56,8 @@ import sidemount  # noqa: E402
 from textual import work  # noqa: E402
 from textual.app import App, ComposeResult  # noqa: E402
 from textual.binding import Binding  # noqa: E402
-from textual.containers import Horizontal, Vertical  # noqa: E402
+from textual.containers import (Horizontal, Vertical,  # noqa: E402
+                                VerticalScroll)
 from textual.screen import ModalScreen  # noqa: E402
 from textual.widgets import (Button, DataTable, Footer, Header,  # noqa: E402
                              RichLog, Static)
@@ -90,6 +91,8 @@ HELP = """\
   s        TOPLA + DAĞIT (iki fazlı akış, kapsamın tamamı)
   h        radyoyu devret (seçili satırın domain'i) — yalnız cihazları
            o tarafta KULLANMAK için; yazımın etkili olması için gerekmez
+  ?        bu yardım        ↑ ↓ PgUp PgDn   bu metni kaydırır
+  q        çık
 
 [b]Kapalı misafir[/b]
   Diski bulunuyor ve kendiliğinden salt-okuma bağlanıp okunuyor (koşan VM
@@ -99,8 +102,6 @@ HELP = """\
   Radyo host'tayken yazmak için devir GEREKMEZ: bluetoothd durdurulur,
   yazılır, başlatılır — adaptör yeniden kurulur ve anahtarları taze okur.
   Bedeli: host BT bağlantıları birkaç saniye düşer.
-  ?        bu yardım
-  q        çık
 
 [b]Neden `s` iki faz[/b]
   Çevre birim merkez adresi başına tek bond tutar, yani bir tarafta yapılan
@@ -128,12 +129,19 @@ HELP = """\
 
 
 class Help(ModalScreen):
-    """Yardım — okunur ve kapanır, başka bir şey yapmaz."""
+    """Yardım — okunur ve kapanır, başka bir şey yapmaz.
+
+    KAYDIRILABİLİR, ve bu kozmetik değil: `HELP` 42 satır ve kutunun tavanı
+    ekranın %90'ı. Ölçüldü (2026-09-04, 24 satırlık terminal): eski `Vertical`
+    ile metnin ~19 satırı görünüyor, gerisi **sessizce** kesiliyordu — ne
+    kaydırma çubuğu ne "devamı var" işareti vardı. Kesilen kısım tam da yeni
+    kullanıcının ihtiyacı: hüküm sözlüğü ve `AYRIŞMA` açıklaması.
+    """
 
     BINDINGS = [Binding("escape,q,question_mark", "dismiss", "kapat")]
 
     def compose(self) -> ComposeResult:
-        yield Vertical(Static(HELP, id="helptext"), id="helpbox")
+        yield VerticalScroll(Static(HELP, id="helptext"), id="helpbox")
 
 
 class Confirm(ModalScreen):
@@ -238,6 +246,9 @@ class BtbondTui(App):
         width: 84; height: auto; max-height: 90%;
         border: thick $primary; background: $surface; padding: 1 2;
     }
+    /* Yardım tavana dayanınca KESİLMEZ, kaydırılır (→ `Help` docstring'i).
+       Çubuk aynı zamanda "devamı var" işaretidir. */
+    #helpbox { overflow-y: auto; scrollbar-size-vertical: 1; }
     .mtitle { padding-bottom: 1; }
     .mbody { padding-bottom: 1; }
     .mcmd { padding-bottom: 1; }
@@ -249,7 +260,16 @@ class BtbondTui(App):
         Binding("q", "quit", "çık"),
         Binding("r", "refresh_survey", "tazele"),
         Binding("d", "detail", "ayrıntı"),
-        Binding("enter", "replicate", "replike et"),
+        # `priority=True` ZORUNLU, ve sebebi ölçüldü (2026-09-04, Textual
+        # 8.2.8): odak `DataTable`da ve o widget `enter`ı kendi
+        # `select_cursor`ına harcıyor, yani uygulama bağı **hiç** koşmuyordu ve
+        # aynı sebeple Footer'da da görünmüyordu — en önemli eylem hem gizli
+        # hem ölüydü. Öncelikli bağ odaklı widget'tan ÖNCE denenir.
+        #
+        # `on_data_table_row_selected` BİLEREK kullanılmadı: o mesajı **fare
+        # tıklaması** da gönderiyor, yani tek tıklama yıkıcı bir yazımı
+        # başlatırdı. Tetiği tuşta tutmak tercih değil güvenlik.
+        Binding("enter", "replicate", "replike et", priority=True),
         Binding("s", "sync_all", "topla+dağıt"),
         Binding("h", "handover", "radyoyu devret"),
         Binding("question_mark", "help", "yardım"),

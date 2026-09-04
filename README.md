@@ -151,6 +151,16 @@ birebir aynı**, yeniden üretmek gerekmiyor.
 | `AddressType` 0 / 1 | `AddressType=public` / `static` |
 | `Devices\<cihaz-mac>\Name` | `[General] Name` |
 
+**Çift kipli cihaz tek dosyaya, iki bölüm birden.** Windows aynı MAC'in
+klasik anahtarını `Keys\<adaptör>` **değeri**, LE bond'unu aynı yolun **alt
+anahtarı** olarak tutuyor, yani bir cihaz ikisinde birden durabiliyor. BlueZ
+tarafında karşılığı **tek** `info` dosyası: `[LinkKey]` ve `[LongTermKey]`
+yan yana, `SupportedTechnologies=BR/EDR;LE;`. `bluezbond.bond_info` bu satırın
+tek sahibi ve değeri eldekinden türetiyor. Ölçüldü (2026-09-04): daha önce iki
+ayrı döngü aynı dosyaya iki kez yazıyor ve LE yazımı `[LinkKey]`i **siliyordu**
+— hata yok, çıkış kodu 0. Gerçek bir çift kipli cihazda **sınanmadı**, bu
+makinede öyle bir cihaz yok.
+
 **Bayt sırası aynı** — `REG_BINARY` baytları BlueZ'in hex dizesine olduğu gibi
 yazılır, ters çevrilmez (`--key-order asis`, ölçüldü: iki cihaz da bağlandı).
 Ters kol bayrakla duruyor çünkü başka bir Windows sürümünde sınanmadı.
@@ -539,6 +549,13 @@ tests/test_emitters.py --update   # altın dosyayı KASITLI olarak yenile
 TUI testi arayüzün **kararlarını** ölçüyor, çizimini değil: hükümler modelden
 mi geliyor, kapı yıkıcı yolu kesiyor mu, `ANAHTAR FARKLI` kendiliğinden
 koşmuyor mu, ve yazımdan sonra tablo bayat işaretleniyor mu.
+
+**Bir denetim de tuşa BASIYOR, ve sebebi ödenmiş bir hata** (2026-09-04):
+yazma testlerinin tamamı `app.action_replicate()`i doğrudan çağırıyordu, yani
+kararı sınıyor ama **tuşu** sınamıyordu. O boşlukta `Enter` ölüydü — odak
+`DataTable`da ve widget tuşu kendi seçim eylemine harcıyordu, uygulama bağı
+hiç koşmuyor ve aynı sebeple alt çubukta da görünmüyordu. Çare bağın
+`priority=True` olması; onu ancak tuşa basan bir test koruyabilir.
 
 `sidemount.py` bu pakette **değil**: gerçek disk, root ve `nbd` istiyor. Ölçümü
 elle yapıldı (2026-09-04, 19/19) ve arşivde kayıtlı; kapalı bir domain ile

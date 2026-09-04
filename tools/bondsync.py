@@ -216,7 +216,11 @@ def _host_state(root, adapter):
                 prints[label] = winbond.fingerprint(key)
         out[dev] = {
             "name": bluezbond.device_name(info, dev),
-            "tech": "BR/EDR" if "BR/EDR" in techs else ("LE" if "LE" in techs else "?"),
+            # ÇİFT KİP KAYIPSIZ: eski biçim `techs`i tek değere indiriyordu ve
+            # `BR/EDR;LE;` taşıyan bir cihaz ekranda yalnız `BR/EDR` görünüyordu.
+            # `guest_state` aynı etiketi zaten böyle üretiyor — iki taraf aynı
+            # dili konuşmalı, yoksa eşleşen satır farklı teknolojide görünür.
+            "tech": "+".join(t for t in ("BR/EDR", "LE") if t in techs) or "?",
             "fp": prints,
         }
     return out

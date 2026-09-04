@@ -372,6 +372,65 @@ async def t_read_empty_side():
         await pilot.__aexit__(None, None, None)
 
 
+
+# --- TUŞA BASARAK: eylemi çağırmak yetmez -------------------------------
+#
+# BU TESTİN VAR OLMA SEBEBİ ÖLÇÜLDÜ (2026-09-04): bu dosyadaki her yazma
+# testi `app.action_replicate()`i **doğrudan** çağırıyordu, yani kararı
+# sınıyor ama **tuşu** sınamıyordu. O boşlukta `enter` aylarca ÖLÜYDÜ — odak
+# `DataTable`da ve widget tuşu kendi `select_cursor`ına harcıyor, uygulama
+# bağı hiç koşmuyordu. Çare `priority=True`, ve onu ancak tuşa basan bir test
+# koruyabilir. Deponun kendi dersi: hükmü kayıt değil çalışması taşır.
+async def t_enter_key_reaches_action():
+    bondsync.survey_all = lambda *a, **k: survey([side("d1", [
+        row("AA:BB:CC:DD:EE:01", bondsync.HOST_ONLY, "to-guest",
+            host={"LTK": "fp1"}),
+    ])])
+    app = tui.BtbondTui(["d1"], "/tmp", "0000:0000")
+    pilot, driver = await boot(app)
+    try:
+        check("başta modal yok", type(app.screen).__name__, "Screen")
+        await driver.press("enter")
+        await driver.pause()
+        check("ENTER onay ekranını açtı", type(app.screen).__name__, "Confirm")
+    finally:
+        await pilot.__aexit__(None, None, None)
+
+
+# --- Yardım TAVANA DAYANINCA KAYDIRILIR, kesilmez -----------------------
+#
+# 42 satırlık metin 24 satırlık terminalde sessizce kırpılıyordu: ne çubuk ne
+# "devamı var" işareti vardı, ve kesilen kısım hüküm sözlüğüydü.
+async def t_help_scrolls():
+    bondsync.survey_all = lambda *a, **k: survey([side("d1", [])])
+    app = tui.BtbondTui(["d1"], "/tmp", "0000:0000")
+    pilot = app.run_test(size=(100, 24))
+    driver = await pilot.__aenter__()
+    for _ in range(80):
+        if app.survey is not None:
+            break
+        await driver.pause(0.05)
+    try:
+        await driver.press("question_mark")
+        await driver.pause()
+        box = app.screen.query_one("#helpbox")
+        check("yardım kutusu kaydırılabilir", box.max_scroll_y > 0, True)
+        # Metnin TAMAMI kutuda: sanal yükseklik satır sayısını karşılıyor,
+        # görünen pencere ondan küçük. Eski kırpılma tam burada görünürdü.
+        check("metnin tamamı kutuda duruyor",
+              box.virtual_size.height >= len(tui.HELP.splitlines()), True)
+        check("görünen pencere metinden küçük",
+              box.size.height < box.virtual_size.height, True)
+    finally:
+        await pilot.__aexit__(None, None, None)
+
+
+print("\n=== TUI: ENTER tuşu eyleme ULAŞIYOR mu ===")
+run(t_enter_key_reaches_action())
+
+print("\n=== TUI: yardım kırpılmıyor, kaydırılıyor ===")
+run(t_help_scrolls())
+
 print("\n=== TUI: okunmuş ama boş taraf ===")
 run(t_read_empty_side())
 

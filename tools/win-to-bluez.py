@@ -237,33 +237,47 @@ def replicate(adapters, names, devices, args, only):
             print("  ATLANDI: host'ta bu adaptörün dizini yok — başka radyo mu?")
             continue
 
-        for dev, link_key in sorted(entry["bredr"].items()):
+        # DÖNGÜ CİHAZ BAZINDA, teknoloji bazında DEĞİL. Sebebi ölçüldü
+        # (2026-09-04): iki ayrı döngü aynı MAC'i **aynı** `info` dosyasına iki
+        # kez yazıyordu ve ikincisi birincisini siliyordu → `bluezbond.bond_info`
+        # docstring'i. Çift kipli cihaz iki kovada birden duruyor, o yüzden
+        # birleşim üzerinde gezilir ve dosya **tek** seferde yazılır.
+        for dev in sorted(set(entry["bredr"]) | set(entry["le"])):
             if only and dev not in only:
                 continue
             name = names.get(dev, dev)
-            print(f"  BR/EDR {dev}  \"{name}\"")
-            content = bluezbond.merge_preserved(
-                bluezbond.read_info(args.root, adapter, dev),
-                bluezbond.bredr_info(name, link_key, args.link_key_type, args.key_order))
-            written += bluezbond.write_info(args.root, adapter, dev, content,
-                                            args.force, args.dry_run)
+            link_key = entry["bredr"].get(dev)
+            bond = entry["le"].get(dev)
 
-        for dev, bond in sorted(entry["le"].items()):
-            if only and dev not in only:
-                continue
-            name = names.get(dev, dev)
-            addr_code, addr_source = winbond.le_address_type(bond, devices.get(dev, {}))
-            # Anahtar baytları BASILMAZ: eleme ada göre değil değere göre
-            # (`winbond.redact`) — ad bazlı liste `CSRK`i kaçırmıştı.
-            fields = ", ".join(f"{k}={v}" for k, v in
-                               sorted(winbond.redact(bond).items()))
-            print(f"  LE     {dev}  \"{name}\"  "
-                  f"AddressType={addr_code} (kaynak: {addr_source})")
-            print(f"           [{fields}]")
+            addr_code = addr_source = None
+            if bond is not None:
+                addr_code, addr_source = winbond.le_address_type(
+                    bond, devices.get(dev, {}))
+
+            techs = "+".join(t for t, has in (("BR/EDR", link_key is not None),
+                                              ("LE", bond is not None)) if has)
+            head = f"  {techs:<9} {dev}  \"{name}\""
+            if bond is not None:
+                head += f"  AddressType={addr_code} (kaynak: {addr_source})"
+            print(head)
+            if bond is not None:
+                # Anahtar baytları BASILMAZ: eleme ada göre değil değere göre
+                # (`winbond.redact`) — ad bazlı liste `CSRK`i kaçırmıştı.
+                print("           [" + ", ".join(
+                    f"{k}={v}" for k, v in sorted(winbond.redact(bond).items()))
+                    + "]")
+            if link_key is not None and bond is not None:
+                print("           ÇİFT KİPLİ: `[LinkKey]` ve LE bölümleri "
+                      "aynı dosyaya birlikte yazılıyor")
+
             content = bluezbond.merge_preserved(
                 bluezbond.read_info(args.root, adapter, dev),
-                bluezbond.le_info(name, bond, args.key_order, args.authenticated,
-                                  addr_code))
+                bluezbond.bond_info(name, args.key_order,
+                                    link_key=link_key,
+                                    key_type=args.link_key_type,
+                                    le_bond=bond,
+                                    authenticated=args.authenticated,
+                                    addr_type_code=addr_code))
             written += bluezbond.write_info(args.root, adapter, dev, content,
                                             args.force, args.dry_run)
     return written

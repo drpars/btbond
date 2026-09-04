@@ -105,6 +105,44 @@ check("LTK parmak izi", rows[DEV_MAC]["fp"]["LTK"], winbond.fingerprint("33" * 1
 check("LEAddressType Devices'ten çözülüyor",
       winbond.le_address_type({}, devices[DEV_MAC]), (1, "Devices"))
 
+print("\n=== ÇİFT KİP: yazıcı iki anahtar bölümünü de KORUYOR ===")
+# ÖLÇÜLDÜ (2026-09-04): yukarıdaki `entry` gerçek bir çift kipli cihazın
+# şekli — aynı MAC hem `Keys\<adaptör>` DEĞERİ hem alt anahtarı. Model bunu
+# zaten birleştiriyordu (bir üstteki `BR/EDR+LE` denetimi), ama YAZICI iki
+# ayrı döngüyle AYNI `info` dosyasına iki kez yazıyor ve ikincisi birincisini
+# siliyordu — `[LinkKey]` `PRESERVED_SECTIONS`ta olmadığı için `merge_preserved`
+# de kurtarmıyordu. Hata yok, rc=0, geriye yalnız `SupportedTechnologies=LE;`
+# kalıyordu. Bu denetim tam o sessiz kaybı kilitliyor.
+import bluezbond  # noqa: E402
+_dual = bluezbond.bond_info(
+    "Test", "asis",
+    link_key=entry["bredr"][DEV_MAC], key_type=4,
+    le_bond=entry["le"][DEV_MAC], authenticated=0, addr_type_code=1)
+check("çift kipte [LinkKey] duruyor", "[LinkKey]" in _dual, True)
+check("çift kipte [LongTermKey] duruyor", "[LongTermKey]" in _dual, True)
+check("teknoloji ikisini birden söylüyor",
+      [line for line in _dual.splitlines() if line.startswith("SupportedTechnologies")],
+      ["SupportedTechnologies=BR/EDR;LE;"])
+check("tek kipte teknoloji tek kalıyor (BR/EDR)",
+      [line for line in bluezbond.bond_info("T", "asis", link_key="aa" * 16).splitlines()
+       if line.startswith("SupportedTechnologies")],
+      ["SupportedTechnologies=BR/EDR;"])
+check("tek kipte teknoloji tek kalıyor (LE)",
+      [line for line in bluezbond.bond_info("T", "asis", le_bond={"LTK": "bb" * 16},
+                                            addr_type_code=0).splitlines()
+       if line.startswith("SupportedTechnologies")],
+      ["SupportedTechnologies=LE;"])
+# `AddressType` YALNIZ LE'de yazılır — BR/EDR-only kayda sızarsa biçim bozulur.
+check("BR/EDR-only kayıtta AddressType YOK",
+      "AddressType" in bluezbond.bond_info("T", "asis", link_key="aa" * 16), False)
+# Host tarafının etiketi de kayıpsız olmalı, yoksa eşleşen satır iki tarafta
+# FARKLI teknolojide görünür ve okuyan tur onu ayrışma sanır.
+_dual_info = bluezbond._parser()
+_dual_info.read_string(_dual)
+check("host_state etiketi çift kipi taşıyor",
+      "+".join(t for t in ("BR/EDR", "LE")
+               if t in bluezbond.technologies(_dual_info)), "BR/EDR+LE")
+
 print("\n=== LEFlags: sabit YOK, ya korunur ya verilir ya yazılmaz ===")
 # Ölçüldü (2026-09-04): Xbox 0x10030000, fare 0x000B0000 — cihaza göre
 # değişiyor ve n=2'de hangi bitin neye bağlı olduğu ayrıştırılamıyor. Sabit

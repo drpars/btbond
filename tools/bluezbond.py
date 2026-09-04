@@ -205,61 +205,90 @@ def device_id(info):
     }
 
 
-def bredr_info(name, link_key, key_type, order):
-    """BR/EDR bond'u için `info` içeriği üret."""
-    from winbond import key_hex
-    return "\n".join([
-        "[General]",
-        f"Name={name}",
-        "SupportedTechnologies=BR/EDR;",
-        "Trusted=true",
-        "Blocked=false",
-        "",
-        "[LinkKey]",
-        f"Key={key_hex(link_key, order)}",
-        f"Type={key_type}",
-        "PINLength=0",
-        "",
-    ])
+def bond_info(name, order, link_key=None, key_type=4, le_bond=None,
+              authenticated=0, addr_type_code=None):
+    """Bir cihazın `info` içeriği — ÇİFT KİPLİ cihazda İKİ anahtar bölümü birden.
 
+    **`SupportedTechnologies`in tek sahibi burası**, ve değeri sabit değil
+    ELDEKİNDEN türetiliyor: `link_key` varsa `BR/EDR;`, `le_bond` varsa `LE;`,
+    ikisi varsa `BR/EDR;LE;`.
 
-def le_info(name, bond, order, authenticated, addr_type_code):
-    """LE bond'u için `info` içeriği üret (`bond` = Windows LE alan sözlüğü).
+    ÖLÇÜLDÜ (2026-09-04, sentetik girdiyle, cihaz gerekmedi): aynı MAC
+    Windows'ta hem `Keys\\<adaptör>` **değeri** (BR/EDR link key) hem aynı
+    yolun **alt anahtarı** (LE bond) olarak durabiliyor, ve `winbond.collect`
+    ikisini ayrı kovaya koyuyor. Eski yol iki kovayı ayrı ayrı yazıyordu;
+    ikisi de **aynı** `<adaptör>/<cihaz>/info` dosyasına gittiği için LE
+    yazımı BR/EDR'yi **siliyordu** — `[LinkKey]` `PRESERVED_SECTIONS`ta
+    olmadığı için `merge_preserved` da kurtarmıyordu. Hata yok, rc=0, geriye
+    yalnız `SupportedTechnologies=LE;` kalıyordu. Ters yön (`bluez-to-win.py`)
+    hep doğruydu: orada iki **bağımsız `if`** var, tek dosya değil iki ayrı
+    kayıt defteri yolu yazılıyor.
 
     `addr_type_code` çağırandan gelir (0 public / 1 random). Kaynağı `Keys`
     olmayabilir — bazı cihazda o alan hiç yazılmıyor; kararı
     `winbond.le_address_type` verir.
+
+    KAPSAM: `BR/EDR;LE;` biçimi `technologies()`in ayrıştırıcısından
+    türetildi (`split(";")`) ve bu makinedeki bond'ların tek teknolojili
+    biçimiyle uyumlu; **gerçek bir çift kipli cihazda ölçülmedi** — bu
+    makinede öyle bir cihaz yok.
     """
     from winbond import as_uint, key_hex
 
-    addr_type = "public" if addr_type_code == 0 else "static"
-    enc_size = as_uint(bond.get("KeyLength", 16), 32)
-    ediv = as_uint(bond.get("EDIV", 0), 32)
-    rand = as_uint(bond.get("ERand", 0), 64)
+    techs = []
+    if link_key is not None:
+        techs.append("BR/EDR")
+    if le_bond is not None:
+        techs.append("LE")
 
-    lines = [
-        "[General]",
-        f"Name={name}",
-        f"AddressType={addr_type}",
-        "SupportedTechnologies=LE;",
+    lines = ["[General]", f"Name={name}"]
+    # `AddressType` YALNIZ LE'de yazılır (ölçülmüş biçim → modül başlığı).
+    if le_bond is not None:
+        lines.append(f"AddressType={'public' if addr_type_code == 0 else 'static'}")
+    lines += [
+        "SupportedTechnologies=" + "".join(f"{tech};" for tech in techs),
         "Trusted=true",
         "Blocked=false",
         "",
     ]
-    if "IRK" in bond:
-        lines += ["[IdentityResolvingKey]", f"Key={key_hex(bond['IRK'], order)}", ""]
-    if "LTK" in bond:
+
+    if link_key is not None:
         lines += [
-            "[LongTermKey]",
-            f"Key={key_hex(bond['LTK'], order)}",
-            f"Authenticated={authenticated}",
-            f"EncSize={enc_size}",
-            f"EDiv={ediv}",
-            f"Rand={rand}",
+            "[LinkKey]",
+            f"Key={key_hex(link_key, order)}",
+            f"Type={key_type}",
+            "PINLength=0",
             "",
         ]
-    lines += _signature_sections(bond, order, authenticated)
+
+    if le_bond is not None:
+        if "IRK" in le_bond:
+            lines += ["[IdentityResolvingKey]",
+                      f"Key={key_hex(le_bond['IRK'], order)}", ""]
+        if "LTK" in le_bond:
+            lines += [
+                "[LongTermKey]",
+                f"Key={key_hex(le_bond['LTK'], order)}",
+                f"Authenticated={authenticated}",
+                f"EncSize={as_uint(le_bond.get('KeyLength', 16), 32)}",
+                f"EDiv={as_uint(le_bond.get('EDIV', 0), 32)}",
+                f"Rand={as_uint(le_bond.get('ERand', 0), 64)}",
+                "",
+            ]
+        lines += _signature_sections(le_bond, order, authenticated)
+
     return "\n".join(lines)
+
+
+def bredr_info(name, link_key, key_type, order):
+    """Yalnız BR/EDR — `bond_info`ya ince sarmal (düzenin sahibi orası)."""
+    return bond_info(name, order, link_key=link_key, key_type=key_type)
+
+
+def le_info(name, bond, order, authenticated, addr_type_code):
+    """Yalnız LE — `bond_info`ya ince sarmal (düzenin sahibi orası)."""
+    return bond_info(name, order, le_bond=bond, authenticated=authenticated,
+                     addr_type_code=addr_type_code)
 
 
 # Windows ↔ BlueZ imza anahtarı eşlemesi. Yön TÜRETİM, ölçüm değil: "Inbound"
