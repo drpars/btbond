@@ -161,33 +161,11 @@ def resolve_domains(explicit):
     return agentexec.resolve_scope(explicit)
 
 
-def state_path(name):
-    """Çağıran kullanıcının durum dizini — `sudo` altında root'un evi DEĞİL.
-
-    `sync` root koşuyor; `~` genişletmesi `/root`a gider ve dosya kullanıcının
-    göremeyeceği bir yere düşerdi.
-    """
-    user = os.environ.get("SUDO_USER")
-    home = Path(f"~{user}").expanduser() if user else Path.home()
-    base = os.environ.get("XDG_STATE_HOME") or (home / ".local/state")
-    return Path(base) / "btbond" / name
-
-
-def give_back(path):
-    """`sudo` altında oluşturulan yolu çağıran kullanıcıya devret.
-
-    ÖLÇÜLDÜ (2026-09-04): yol kullanıcının evine çözülüyor ama `mkdir`/`open`
-    root koştuğu için dizin de dosya da **root'un** oluyordu
-    (`drwxr-xr-x root root`) — kullanıcı kendi durum dizinini yönetemiyor,
-    silemiyor. Yol doğru, sahiplik yanlıştı.
-    """
-    uid, gid = os.environ.get("SUDO_UID"), os.environ.get("SUDO_GID")
-    if uid is None or gid is None:
-        return
-    try:
-        os.chown(path, int(uid), int(gid))
-    except OSError:
-        pass
+# Durum dizini + sahipliği `hcicapture`ın: dosyayı o üretiyor, yerini o
+# biliyor, ve `bluez-to-win` onu TÜKETİYOR. İki yerde tanımlanırsa biri
+# ilerler öbürü donar — bu deponun kuralı.
+state_path = hcicapture.state_path
+give_back = hcicapture.give_back
 
 
 def capture_target(direction):
@@ -227,14 +205,87 @@ def provoke(devices, deadline):
         sys.stdout.flush()
 
 
+def start_capture(capture_to, limit_seconds, keep_log):
+    """btmon yakalamasını başlat ve `Capture`ı ver (dizin + sahiplik dahil)."""
+    capture_to.parent.mkdir(parents=True, exist_ok=True)
+    give_back(capture_to.parent)
+    log = capture_to.with_suffix(".btmon.log")
+    print(f"  [hci] yakalama başladı → {log}"
+          + ("" if keep_log else " (ayrıştırmadan sonra silinir: anahtar taşıyor)"))
+    return hcicapture.Capture(str(log), limit_seconds=limit_seconds,
+                              keep_log=keep_log).start()
+
+
+def harvest(capture, capture_to, deadline, root):
+    """Cihazları tetikle, uzak bilgiyi İSTE, yakalamayı durdur, birleştir.
+
+    Devir yolu da devirsiz yol da buradan geçiyor — tek sahip. Sıra önemli:
+    önce bağlantı (`provoke`), sonra bağlantı listesi, sonra komutlar. Liste
+    `provoke`dan SONRA okunuyor ki taze handle'lar görünsün, ve aynı liste
+    `parse`a handle→adres TOHUMU olarak veriliyor (tohumsuz `parse` var olan
+    bağlantıda boş döner — ölçüldü).
+    """
+    provoke(bonded_devices(root), deadline)
+    cons = hcicapture.connections()
+    sent = hcicapture.request_remote_info(cons)
+    print(f"  [hci] {len(cons)} bağlantı, {sent} sorgu yollandı")
+    sys.stdout.flush()
+    # EN AZ 2 sn: son olay ~1 ms'de geliyor ama btmon'un satırı dosyaya
+    # düşmesi bekleniyor; hemen durdurulursa son kayıt kaybolur.
+    remaining = max(2, int(deadline - time.time()))
+    seed = {handle: address for handle, address, _kind in cons}
+    parsed = hcicapture.parse(capture.stop(settle_seconds=remaining),
+                              by_handle=seed)
+    print("  [hci] toplanan uzak cihaz bilgisi:")
+    for line in hcicapture.summary(parsed, kinds={a: k for _h, a, k in cons}):
+        print("  " + line)
+    merged = {}
+    if capture_to.exists():
+        merged = json.loads(capture_to.read_text(encoding="utf-8"))
+    for address, entry in parsed.items():
+        merged.setdefault(address, {}).update(hcicapture.to_windows_fields(entry))
+    capture_to.write_text(json.dumps(merged, indent=2, sort_keys=True),
+                          encoding="utf-8")
+    give_back(capture_to)
+    print(f"  [hci] kaydedildi → {capture_to}")
+    return parsed
+
+
+def remote_info(capture_to, usb_id, settle=25, root=bluezbond.ROOT,
+                keep_log=False):
+    """Devirsiz toplama — radyo host'ta ve cihazlar bağlanabiliyorsa yeter.
+
+    Bu giriş noktası, yakalamanın devir penceresine bağlı olmasının GEREKSİZ
+    olduğu ölçüldükten sonra açıldı (2026-09-04): sürüm komutunu çekirdek hiç
+    yollamıyor, özellik komutunu da yalnız bağlantı kurulurken yolluyor — ama
+    ikisi de var olan bir bağlantıda İSTENİNCE ateşliyor.
+
+    Kapı: radyo host'ta değilse toplanacak bir şey yok, ve boş bir yakalama
+    "cihazlar cevap vermedi" gibi görünürdü — o yüzden durum önce söylenir.
+    """
+    # Yalnız HOST yarısı okunuyor: sorulan şey "radyo nerede" değil, "host
+    # denetleyicisi var mı". Nerede olduğu burada SORULMUYOR ve iddia da
+    # edilmiyor — onu `status` kapsamıyla birlikte söylüyor.
+    if not bondsync.radio_where(usb_id=usb_id)["host"]:
+        print("host'ta adaptör yok (`/sys/class/bluetooth` altında `hciN` yok) "
+              "— uzak bilgi yalnız host denetleyicisinden okunabilir. "
+              "Radyonun nerede olduğu burada sorulmadı: `status` söyler.")
+        return 1
+    capture = start_capture(capture_to, settle + 90, keep_log)
+    harvest(capture, capture_to, time.time() + settle, root)
+    return 0
+
+
 def handover(direction, domain, usb_id, dry_run, capture_to=None, settle=25,
              root=bluezbond.ROOT, keep_log=False):
     """Radyoyu hedef tarafa geçir — yazımdan SONRA, çünkü hedef onu okurken alır.
 
-    `capture_to` verilirse devir **btmon yakalamasının içinde** koşar: adaptör
-    host'ta sıfırdan kurulurken bütün cihazlar taze bağlanır ve uzak sürüm /
-    özellik olayları tam o anda geçer. Yakalama devirden ÖNCE başlar; sonra
-    başlatmak hiçbir şey görmez.
+    `capture_to` verilirse devir **btmon yakalamasının içinde** koşar. Devir
+    artık yakalamanın ÖNKOŞULU değil (→ `remote_info`), ama hâlâ en verimli
+    anı: adaptör sıfırdan kurulurken bütün cihazlar taze bağlanır, yani
+    `provoke`un işi kendiliğinden yapılmış olur. Yakalama devirden ÖNCE başlar;
+    sonra başlatmak özellik olaylarını kaçırır (sürüm olayı istenerek
+    üretildiği için ondan etkilenmez).
     """
     action = "--detach" if direction == "to-host" else "--attach"
     cmd = ["vfioctl", "guest", "--name", domain, "usb", action, usb_id]
@@ -244,15 +295,7 @@ def handover(direction, domain, usb_id, dry_run, capture_to=None, settle=25,
               + (f"  (yakalama da atlandı → {capture_to})" if capture_to else ""))
         return 0
 
-    capture = None
-    if capture_to:
-        capture_to.parent.mkdir(parents=True, exist_ok=True)
-        give_back(capture_to.parent)
-        log = capture_to.with_suffix(".btmon.log")
-        print(f"  [hci] yakalama başladı → {log}"
-              + ("" if keep_log else " (ayrıştırmadan sonra silinir: anahtar taşıyor)"))
-        capture = hcicapture.Capture(str(log), limit_seconds=settle + 90,
-                                     keep_log=keep_log).start()
+    capture = start_capture(capture_to, settle + 90, keep_log) if capture_to else None
 
     sys.stdout.flush()
     code = subprocess.run(cmd, timeout=300).returncode
@@ -263,21 +306,7 @@ def handover(direction, domain, usb_id, dry_run, capture_to=None, settle=25,
               f"tetiklenecek ({settle} sn bütçe)…")
         sys.stdout.flush()
         time.sleep(min(8, settle))
-        provoke(bonded_devices(root), deadline)
-        remaining = max(0, int(deadline - time.time()))
-        parsed = hcicapture.parse(capture.stop(settle_seconds=remaining))
-        print("  [hci] toplanan uzak cihaz bilgisi:")
-        for line in hcicapture.summary(parsed):
-            print("  " + line)
-        merged = {}
-        if capture_to.exists():
-            merged = json.loads(capture_to.read_text(encoding="utf-8"))
-        for address, entry in parsed.items():
-            merged.setdefault(address, {}).update(hcicapture.to_windows_fields(entry))
-        capture_to.write_text(json.dumps(merged, indent=2, sort_keys=True),
-                              encoding="utf-8")
-        give_back(capture_to)
-        print(f"  [hci] kaydedildi → {capture_to}")
+        harvest(capture, capture_to, deadline, root)
     return code
 
 
@@ -449,7 +478,8 @@ def run_phases(args, survey, domains, directions, offline=None):
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("command",
-                        choices=("status", "collect", "distribute", "sync", "handover"))
+                        choices=("status", "collect", "distribute", "sync",
+                                 "handover", "remote-info"))
     # TEKRARLANABİLİR ve DARALTICI: verilmezse libvirt'teki BÜTÜN domain'ler
     # işlenir (kapalı olanlar otomatik bağlanıp okunur); `--domain` kapsamı
     # daraltır ve dokunulmayanlar notta adlandırılır → `agentexec.resolve_scope`.
@@ -486,8 +516,8 @@ def main():
     # bayrak verilmiş görünür, hiçbir şey toplanmaz.
     parser.add_argument("--capture-hci", nargs="?", type=Path, const=Path(CAPTURE_DEFAULT),
                         default=None, metavar="DOSYA",
-                        help="devir sırasında btmon ile uzak cihaz bilgisi topla "
-                             "(yalnız --handover ve radyo host'a gelirken); "
+                        help="btmon ile uzak cihaz bilgisi topla (devirle: "
+                             "--handover; devirsiz: `remote-info` komutu); "
                              "varsayılan hedef $XDG_STATE_HOME/btbond/remote-info.json")
     parser.add_argument("--keep-hci-log", action="store_true",
                         help="ham btmon log'unu silme (DİKKAT: bond anahtarları içerir)")
@@ -509,10 +539,17 @@ def main():
             domains.append(domain)
     if args.capture_hci == Path(CAPTURE_DEFAULT):
         args.capture_hci = state_path("remote-info.json")
-    if args.capture_hci and not (args.handover or args.command == "handover"):
-        parser.error("--capture-hci yalnız devirle anlamlı (`handover` komutu ya da "
-                     "`sync --handover`): olaylar radyo host'a gelirken, adaptör "
-                     "kurulurken geçiyor")
+    # ESKİ KAPI KALDIRILDI, ve sebebi ölçüm: *"--capture-hci yalnız devirle
+    # anlamlı"* deniyordu, çünkü olayların yalnız bağlantı kurulurken geçtiği
+    # sanılıyordu. Yanlış (2026-09-04): iki olay da var olan bir bağlantıda
+    # İSTENİNCE ateşliyor. Kalan kısıt yalnız şu — bir yakalama komutu
+    # gerekiyor, ve `remote-info` zaten kendi yakalamasını açıyor.
+    if args.capture_hci and args.command not in ("handover", "remote-info") \
+            and not args.handover:
+        parser.error("--capture-hci bir yakalama turu ister: `remote-info` "
+                     "(devirsiz), `handover` ya da `sync --handover`")
+    if args.command == "remote-info" and args.capture_hci is None:
+        args.capture_hci = state_path("remote-info.json")
     # Radyo TEK: birden çok tarafa aynı turda devretmek anlamsız, ve hangisi
     # olduğu tahmin edilmez.
     if args.handover and len(domains) > 1:
@@ -532,6 +569,18 @@ def main():
             parser.error(f"`{args.command}` komutu {args.direction} fazını "
                          f"içermiyor (fazları: {', '.join(directions)})")
         directions = narrowed
+
+    if args.command == "remote-info":
+        # Devirsiz toplama. Domain kapsamı burada anlamsız: okunan şey host
+        # denetleyicisi, misafir hiç konuşmuyor — o yüzden `--domain`
+        # daraltması sessizce yok sayılmıyor, söyleniyor.
+        if args.domains:
+            print("  [not] `remote-info` host denetleyicisini okur; --domain "
+                  "bu komutta bir şey daraltmıyor.")
+        if os.geteuid() != 0:
+            sys.exit("`remote-info` root ister (btmon monitör soketi + hcitool)")
+        return remote_info(args.capture_hci, args.usb_id, args.settle,
+                           args.root, args.keep_hci_log)
 
     if args.command == "handover":
         # Devir tek basina: yazilacak bir sey OLMASA da radyoyu tasimak ve

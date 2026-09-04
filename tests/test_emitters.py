@@ -82,6 +82,20 @@ def cases():
         "Address": 0, "AddressType": 0, "AuthReq": 45, "CEntralIRKStatus": 1,
         "CSRK": "cc" * 16, "CSRKInbound": "dd" * 16})
 
+    # ÖĞRENİLEN ALANLAR (→ `winbond.REMOTE_NOTU`). Üç dal: BR/EDR'de dördü de
+    # yazılır; LE'de `LMPFeatures` ÖLÇÜLMÜŞ biçimde atlanır (Windows LE
+    # cihazlarda o alanı tutmuyor); bilinmeyen alan hiç yazılmaz.
+    REMOTE = {"LMPFeatures": 0x877BBFD8FE0DFEAF, "LmpVersion": 8,
+              "LmpSubversion": 12850, "ManufacturerId": 148}
+    yield "05c record BR/EDR + öğrenilen", winbond.device_record_script(
+        ADAPTER, DEV, "", False, {}, [], None, remote=REMOTE)
+    yield "05d record LE + öğrenilen (LMPFeatures ATLANIR)", \
+        winbond.device_record_script(ADAPTER, DEV, "", True, {}, [], None,
+                                     remote=REMOTE)
+    yield "05e record BR/EDR + kısmi öğrenilen", winbond.device_record_script(
+        ADAPTER, DEV, "", False, {}, [], None,
+        remote={"LmpVersion": 10, "LMPFeatures": None})
+
     yield "09 remove LE", winbond.remove_script(ADAPTER, DEV, True)
     yield "10 remove BR/EDR", winbond.remove_script(ADAPTER, DEV, False)
     yield "11 WRITE_PRELUDE", winbond.WRITE_PRELUDE

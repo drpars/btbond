@@ -52,6 +52,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import bluezbond  # noqa: E402
 import winbond  # noqa: E402
 import agentexec  # noqa: E402
+import hcicapture  # noqa: E402
 import hivebond  # noqa: E402
 from agentexec import run_powershell  # noqa: E402
 
@@ -139,17 +140,41 @@ def le_attrs(info, adapter, dev, address_type, with_container):
     return attrs
 
 
+def describe_remote(remote, is_le):
+    """Öğrenilen alanlar için rapor satırı — eksikse SEBEBİYLE.
+
+    Sessiz bir eksiklik bu depoda ödenmiş sınıf: alan yazılmazsa Windows
+    BR/EDR profil devnode'larını kurmuyor ve hata vermiyor. O yüzden satır
+    her cihazda basılıyor, dolu da olsa boş da.
+    """
+    wanted = ["LmpVersion", "LmpSubversion", "ManufacturerId"]
+    if not is_le:
+        wanted.append("LMPFeatures")
+    have = [f for f in wanted if remote.get(f) is not None]
+    if not have:
+        return ("öğrenilen alanlar YOK — `btbond-sync remote-info` ile "
+                "toplanır; yoksa Windows profil devnode'larını kurmayabilir")
+    missing = [f for f in wanted if f not in have]
+    line = "öğrenilen: " + ", ".join(f"{f}={remote[f]}" for f in have)
+    return line + (f"  (eksik: {', '.join(missing)})" if missing else "")
+
+
 def plan(root, adapter, bonds, guest, only, order, authreq, force, container=True,
-         guest_svc=None, le_flags_override=None):
+         guest_svc=None, le_flags_override=None, remote_info=None):
     """Yazılacak işleri belirle. Döner: (parçalar, rapor satırları).
 
     `guest_svc`: hedefin `ServicesFor<adaptör>` alanları (→ `winbond.collect`).
     `LEFlags` **cihaza göre değişiyor ve türetilemedi** → `winbond.LEFLAGS_NOTU`,
     o yüzden sıra: kullanıcı verdiyse o, hedefte varsa **korunur**, ikisi de
     yoksa **hiç yazılmaz** ve rapor bunu söyler.
+
+    `remote_info`: HCI'dan öğrenilen alanlar (→ `winbond.REMOTE_NOTU`). Bunlar
+    hiçbir BlueZ dosyasında yok; eskiden elle yazılıyorlardı. Kaynağı
+    `btbond-sync remote-info` (ya da `sync --handover --capture-hci`).
     """
     chunks, report = [], []
     guest_svc = guest_svc or {}
+    remote_info = remote_info or {}
     guest_entry = guest.get(adapter, {"bredr": {}, "le": {}, "central_irk": None})
 
     for dev, info in sorted(bonds.items()):
@@ -170,12 +195,14 @@ def plan(root, adapter, bonds, guest, only, order, authreq, force, container=Tru
                 sdp = bluezbond.service_records(root, adapter, dev)
                 chunks.append(winbond.bredr_ops(
                     adapter, dev, winbond.key_hex(link_key, order).lower()))
+                remote = remote_info.get(dev, {})
                 chunks.append(winbond.device_record_ops(
-                    adapter, dev, name, False, attrs, uuids, sdp))
+                    adapter, dev, name, False, attrs, uuids, sdp, remote=remote))
                 report.append(f"  BR/EDR {dev}  \"{name}\"  LinkKey fp={fp}"
                               f"{'  (ÜZERİNE YAZILIYOR)' if exists else ''}")
                 report.append(f"           [COD={attrs['COD']}, profil={len(uuids)}, "
                               f"SDP kaydı={len(sdp)}]")
+                report.append("           " + describe_remote(remote, is_le=False))
                 if not sdp:
                     report.append("           UYARI: BlueZ cache'inde SDP kaydı yok — "
                                   "profil devnode'ları doğmayabilir")
@@ -201,9 +228,11 @@ def plan(root, adapter, bonds, guest, only, order, authreq, force, container=Tru
                 else:
                     flags_note = ("LEFlags=YAZILMIYOR (cihaza göre değişiyor, "
                                   "türetilemedi; yokluğunun etkisi ölçülmedi)")
+                remote = remote_info.get(dev, {})
                 chunks.append(winbond.le_ops(adapter, dev, fields))
                 chunks.append(winbond.device_record_ops(
-                    adapter, dev, name, True, attrs, [], le_flags=le_flags))
+                    adapter, dev, name, True, attrs, [], le_flags=le_flags,
+                    remote=remote))
                 extra = ", ".join(f"{k}={fields[k]}" for k in
                                   ("KeyLength", "EDIV", "ERand", "AddressType",
                                    "AuthReq", "CEntralIRKStatus", "Address"))
@@ -215,6 +244,7 @@ def plan(root, adapter, bonds, guest, only, order, authreq, force, container=Tru
                          for k, v in sorted(attrs.items()) if v is not None}
                 report.append(f"           [{', '.join(f'{k}={v}' for k, v in shown.items())}]")
                 report.append(f"           {flags_note}")
+                report.append("           " + describe_remote(remote, is_le=True))
 
         if not link_key and not ltk:
             report.append(f"  ATLANDI {dev}  \"{name}\"  — anahtar bölümü yok "
@@ -263,6 +293,14 @@ def main():
                         help="LE cihaz kaydına yazılacak `LEFlags` (0x… kabul "
                              "edilir); verilmezse hedefteki korunur, o da "
                              "yoksa alan hiç yazılmaz")
+    # ÖĞRENİLEN ALANLAR: cihazdan HCI ile gelir, BlueZ'de yok
+    # (→ `winbond.REMOTE_NOTU`). Varsayılan yol `hcicapture`ın yazdığı yer;
+    # `--no-remote-info` alanları hiç yazmadan koşturur (eski davranış).
+    parser.add_argument("--remote-info", metavar="DOSYA", default=None,
+                        help="HCI'dan öğrenilen alanların dosyası "
+                             "(varsayılan: $XDG_STATE_HOME/btbond/remote-info.json)")
+    parser.add_argument("--no-remote-info", action="store_true",
+                        help="öğrenilen alanları HİÇ yazma")
     parser.add_argument("--remove", action="store_true",
                         help="yazma; misafirdeki bond'ları sil (--only ile daraltılır)")
     parser.add_argument("--dry-run", action="store_true",
@@ -323,11 +361,18 @@ def main():
     if args.remove:
         chunks, report = plan_removals(adapter, guest, only)
     else:
+        remote_info = {} if args.no_remote_info \
+            else hcicapture.load_remote_info(args.remote_info)
+        source = "kapalı (--no-remote-info)" if args.no_remote_info else (
+            f"{len(remote_info)} cihaz  ← "
+            f"{args.remote_info or hcicapture.state_path()}")
+        print(f"öğrenilen alanlar: {source}")
         chunks, report = plan(args.root, adapter, bonds, guest, only,
                               args.key_order, args.authreq, args.force,
                               container=not args.no_container_id,
                               guest_svc=guest_svc,
-                              le_flags_override=args.le_flags)
+                              le_flags_override=args.le_flags,
+                              remote_info=remote_info)
 
     for line in report:
         print(line)

@@ -184,6 +184,12 @@ vfioctl guest --name <domain> usb --detach <vendor>:<product>
 - **Misafir (ajan kanalı):** `qemu-guest-agent` kurulu ve yanıt veriyor
 - **Offline kanal:** `hivex` (Python bağlamasıyla), NTFS sürücüsü (`ntfs3`
   çekirdekte yeter, `ntfs-3g` gerekmez); imaj dosyası için ayrıca `qemu-nbd`
+- **Uzak cihaz bilgisi (`remote-info`):** `btmon` (bluez-utils) **ve**
+  `hcitool` (Arch'ta `bluez-deprecated-tools`). İkincisi opsiyonel değil:
+  çekirdek `Read Remote Version Information`ı **hiç yollamıyor** (ölçüldü —
+  `bluetooth.ko`da opcode `0x041d` sıfır kez geçiyor ve olayın işleyicisi
+  yok), yani komutu araç kendisi yollamak zorunda. Yoksa araç susmaz,
+  eksikliği **söyler**.
 - Bond'ları okumak/yazmak root gerektirir (`/var/lib/bluetooth` 0700; kovan
   için mount)
 
@@ -259,13 +265,28 @@ duran taraf çalışan tek taraf olabilir ve çoğunluk bayattır. Çıktı bu y
 azınlığı işaretler ama **hüküm vermez**: hakem, cihazı o an bağlayabilen
 taraftır.
 
-`--capture-hci` devir **btmon yakalamasının içinde** koşar ve cihazlardan
-`LMPFeatures` / `LmpVersion` / `LmpSubversion` / `ManufacturerId` toplar —
-"Bilinen boşluk"un ihtiyaç duyduğu dört alan. Yalnız radyo **host'a gelirken**
-anlamlı: ters yönde cihazlar misafirin içinde bağlanır ve host denetleyicisi
-hiçbir olay görmez. Sonuç `$XDG_STATE_HOME/btbond/remote-info.json`a birikir.
-Ham log `.gitignore`da: yakalama bir eşleştirmeye denk gelirse anahtar
-dağıtımı da o log'a girer.
+**Uzak cihaz bilgisi: `remote-info`.** Windows BR/EDR profil devnode'larını
+ancak cihazın `LMPFeatures` / `LmpVersion` / `LmpSubversion` / `ManufacturerId`
+alanlarını bildiğinde kuruyor, ve bu dördü **hiçbir BlueZ dosyasında yok** —
+cihazdan HCI ile öğrenilir.
+
+```
+sudo tools/btbond-sync.py remote-info                      # devirsiz topla
+sudo tools/btbond-sync.py sync --handover --capture-hci    # devrin içinde topla
+```
+
+Devir **gerekmiyor**: iki HCI olayı da var olan bir bağlantıda istenince
+ateşliyor (ölçüldü — üç cihaz, BR/EDR ve LE). `remote-info` bond'lu cihazlara
+bağlanır, komutları yollar, olayları yakalar ve
+`$XDG_STATE_HOME/btbond/remote-info.json`a biriktirir; `bluez-to-win.py` onu
+**kendiliğinden** okur (`--no-remote-info` kapatır). Devir yolu hâlâ en verimli
+an — adaptör sıfırdan kurulurken cihazlar zaten taze bağlanır —, ama yalnız
+radyo **host'a gelirken**: ters yönde cihazlar misafirin içinde bağlanır ve host
+denetleyicisi hiçbir olay görmez.
+
+`LMPFeatures` LE cihazlarda yazılmaz, çünkü Windows onu LE için tutmuyor
+(ölçüldü). Ham log `.gitignore`da: yakalama bir eşleştirmeye denk gelirse
+anahtar dağıtımı da o log'a girer.
 
 **Yön satırın özelliğidir, oturumun değil.** Araç "nereden nereye" diye
 sormaz: tek tarafta duran bond o yöne kopyalanır, iki tarafta tutan hiçbir şey
@@ -593,6 +614,10 @@ MIT → [LICENSE](LICENSE).
 - [x] `→ host` yazımında radyo devri yerine bluetoothd stop/start — kapı artık
       "hedef taze okuyabilecek mi" diye soruyor
 - [ ] `→ misafir` için aynısı: Windows BT yığınını PnP'den kapat/aç (ölçülmedi)
+- [x] Öğrenilen dört alan araçla toplanıyor (`remote-info`, devir gerekmez) ve
+      `bluez-to-win.py` onları **yazıyor** — eskiden elle yazılıyorlardı
+- [ ] Aracın yazdığı öğrenilen alanların, Windows'un hiç görmediği bir cihazda
+      profil devnode'unu gerçekten doğurduğu (elle yazımda ölçüldü, araçla değil)
 
 ## Bilinen boşluk
 
@@ -603,15 +628,27 @@ bunları cihaza bağlanınca kendisi öğrenir — ama bond kaydı yeni yazıld�
 henüz yoktur, ve onlar olmadan ses uç noktası çıkmaz.
 
 Bunlar **hiçbir BlueZ dosyasında yok** (`info` da, `cache/<mac>` da taşımıyor);
-HCI'dan okunur. `LMPFeatures` bu yoldan **çözüldü**: `btmon` (bluez-utils
-içinde, ek kurulum yok) cihazın ACL'i yeniden kurulurken
-`Read Remote Supported Features` olayını basıyor ve baytların little-endian
-okunuşu Windows'un aynı cihaz için yazdığı QWORD'e birebir eşit çıktı.
-Kalan üç alan `Read Remote Version Information`dan gelir ve o olay ölçülen
-kopar-kur turunda **ateşlemedi** — çekirdek onu koşulsuz istemiyor.
-Ölçüldüğünde beş profil düğümü de doğdu ve ses geldi, yani
-tetikleyici oldukları doğrulandı — ama hangisinin tek başına yettiği
-ayrılmadı.
+HCI'dan okunur — ve dördü de artık **araçla toplanıp yazılıyor**
+(`remote-info`, yukarıda).
+
+**Dördü de iki taraflı doğrulandı** (2026-09-04, üç cihaz, iki taşıyıcı):
+host'un HCI'dan okuduğu değerler, aynı cihazların Windows kayıt defterindeki
+karşılıklarına **birebir eşit** çıktı (10 alan karşılaştırıldı, 0 fark).
+`LMPFeatures` little-endian QWORD; `LmpVersion`/`LmpSubversion`/
+`ManufacturerId` DWORD.
+
+Yol boyunca çözülen asıl soru şuydu: `Read Remote Version Information` olayı
+neden hiç ateşlemiyordu? Cevap "çekirdek koşulsuz istemiyor" değil, **hiç
+istemiyor** — `bluetooth.ko`da o opcode (`0x041d`) sıfır kez geçiyor ve olayın
+işleyicisi yok, oysa kardeşlerinin hepsi var. Komut kullanıcı alanından
+yollanınca (`hcitool cmd`) olay geliyor, ve bu var olan bir bağlantıda da
+çalışıyor.
+
+**Kalan boşluk daralttı ama kapanmadı:** alanların Windows'ta profil
+devnode'unu doğurduğu **elle yazıldığında** ölçüldü (beş profil düğümü doğdu,
+ses geldi); aracın yazdığı hâliyle, Windows'un **hiç görmediği** bir cihazda
+uçtan uca sınanmadı. Bu deponun ölçütüyle: o yarı hâlâ kayıt, cihazın
+çalışması değil.
 
 Bu boşluk **yalnız BR/EDR profillerini** etkiler: bond, kimlik doğrulaması ve
 LE tarafının tamamı bu alanlar olmadan da çalışıyor.

@@ -524,14 +524,45 @@ def bredr_script(adapter, dev, link_key_hex):
     return render_powershell(bredr_ops(adapter, dev, link_key_hex))
 
 
+REMOTE_NOTU = """Cihazdan HCI ile ÖĞRENİLEN alanlar — hiçbir BlueZ dosyasında yok.
+
+Windows BR/EDR profil devnode'larını ancak bunları bildiğinde kuruyor; eskiden
+elle yazılıyorlardı. Kaynakları `hcicapture` topluyor ve
+`$XDG_STATE_HOME/btbond/remote-info.json`a biriktiriyor.
+
+TİPLER ÖLÇÜLDÜ (2026-09-04, `win11-nvme` kovanı, üç cihaz): `LMPFeatures`
+**QWord**, `LmpVersion`/`LmpSubversion`/`ManufacturerId` **DWord**.
+
+KAPSAM, ve ikisi ayrı: üç sürüm alanı LE cihazlarda da Windows'ta VAR, ama
+`LMPFeatures` LE'de YOK (fare ve Xbox kayıtlarında o alan hiç geçmiyor) — o
+yüzden LE'de yazılmıyor. Sürüm üçlüsünün LE profil kurulumunda GEREKLİ olup
+olmadığı ÖLÇÜLMEDİ; yazılıyor çünkü Windows'un kendi yazdığı biçim bu.
+
+Bilinmeyen alan YAZILMAZ: uydurulmuş bir sürüm numarası, eksik alandan kötü —
+Windows onu cihazın gerçek yeteneği sanır."""
+
+
+def remote_ops(dev_path, is_le, remote):
+    """`remote` sözlüğündeki BİLİNEN alanları yazan işlemler → `REMOTE_NOTU`."""
+    remote = remote or {}
+    ops = []
+    for field in ("LmpVersion", "LmpSubversion", "ManufacturerId"):
+        if remote.get(field) is not None:
+            ops.append((DW, dev_path, field, int(remote[field])))
+    if not is_le and remote.get("LMPFeatures") is not None:
+        ops.append((QW, dev_path, "LMPFeatures", int(remote["LMPFeatures"])))
+    return ops
+
+
 def device_record_ops(adapter, dev, name, is_le, attrs, services, sdp_records=None,
-                      le_flags=None):
+                      le_flags=None, remote=None):
     """`Devices\\<mac>` + `ServicesFor<adaptör>` kaydını yazan işlemler.
 
     `attrs`: BR/EDR için {"COD": int}; LE için {"LEAppearance", "LEAddressType",
     "VID", "PID", "VIDType", "Version"} (olmayanlar atlanır).
     `services`: BR/EDR profil UUID'leri (LE'de kullanılmaz — Windows LE servis
     düğümlerini GATT keşfinden kuruyor, `ServicesFor` altında {uuid} yok).
+    `remote`: cihazdan HCI ile öğrenilen alanlar → `REMOTE_NOTU`.
     """
     a, d = hex12(adapter), hex12(dev)
     dev_path = f"{DEVICES}\\{d}"
@@ -543,6 +574,7 @@ def device_record_ops(adapter, dev, name, is_le, attrs, services, sdp_records=No
     ]
     if name:
         ops.append((BIN, dev_path, "Name", name_blob(name)))
+    ops += remote_ops(dev_path, is_le, remote)
 
     if is_le:
         if name:
@@ -595,10 +627,10 @@ def device_record_ops(adapter, dev, name, is_le, attrs, services, sdp_records=No
 
 
 def device_record_script(adapter, dev, name, is_le, attrs, services, sdp_records=None,
-                         le_flags=None):
+                         le_flags=None, remote=None):
     """`device_record_ops`un PowerShell hâli."""
     return render_powershell(device_record_ops(
-        adapter, dev, name, is_le, attrs, services, sdp_records, le_flags))
+        adapter, dev, name, is_le, attrs, services, sdp_records, le_flags, remote))
 
 
 def le_ops(adapter, dev, bond):

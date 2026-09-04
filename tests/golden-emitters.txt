@@ -144,6 +144,55 @@ Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Keys\00112233
 Set-Bin 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Keys\001122334455\aabbccddeeff' 'CSRKInbound' 'dddddddddddddddddddddddddddddddd'
 Set-Qw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Keys\001122334455\aabbccddeeff' 'InboundSignCounter' 0
 'OK le aabbccddeeff'
+===== 05c record BR/EDR + öğrenilen =====
+Ensure-Key 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff'
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff' 'DibServiceVersion' 131072
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff' 'LmpVersion' 8
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff' 'LmpSubversion' 12850
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff' 'ManufacturerId' 148
+Set-Qw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff' 'LMPFeatures' 9762607555951853231
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff' 'LocalEvaldIoCap' 1
+Ensure-Key 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455'
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455' 'AuthenticationRequirements' 5
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455' 'BRFlags' 0
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455' 'BasebandSupport' 16384
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455' 'IoCapability' 1
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455' 'RemoteAuthenticationRequirements' 5
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455' 'SSP MITM Protected' 1
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455' 'SSP Paired' 1
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455' 'SSP Supported' 1
+Set-Qw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455' 'BRExtendedDeviceInfoFlags' 0
+'OK record aabbccddeeff'
+===== 05d record LE + öğrenilen (LMPFeatures ATLANIR) =====
+Ensure-Key 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff'
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff' 'DibServiceVersion' 131072
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff' 'LmpVersion' 8
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff' 'LmpSubversion' 12850
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff' 'ManufacturerId' 148
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff' 'LocalEvaldIoCapLE' 4
+Ensure-Key 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455'
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455' 'AuthenticationRequirementsLE' 3
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455' 'BasebandSupport' 32768
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455' 'IoCapabilityLE' 255
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455' 'RemoteAuthenticationRequirementsLE' 255
+Set-Qw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455' 'LEExtendedDeviceInfoFlags' 0
+'OK record aabbccddeeff'
+===== 05e record BR/EDR + kısmi öğrenilen =====
+Ensure-Key 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff'
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff' 'DibServiceVersion' 131072
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff' 'LmpVersion' 10
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff' 'LocalEvaldIoCap' 1
+Ensure-Key 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455'
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455' 'AuthenticationRequirements' 5
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455' 'BRFlags' 0
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455' 'BasebandSupport' 16384
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455' 'IoCapability' 1
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455' 'RemoteAuthenticationRequirements' 5
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455' 'SSP MITM Protected' 1
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455' 'SSP Paired' 1
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455' 'SSP Supported' 1
+Set-Qw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455' 'BRExtendedDeviceInfoFlags' 0
+'OK record aabbccddeeff'
 ===== 09 remove LE =====
 Remove-Item -LiteralPath 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Keys\001122334455\aabbccddeeff' -Recurse -Force -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff' -Recurse -Force -ErrorAction SilentlyContinue
