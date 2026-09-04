@@ -228,10 +228,19 @@ def bond_info(name, order, link_key=None, key_type=4, le_bond=None,
     olmayabilir — bazı cihazda o alan hiç yazılmıyor; kararı
     `winbond.le_address_type` verir.
 
-    KAPSAM: `BR/EDR;LE;` biçimi `technologies()`in ayrıştırıcısından
-    türetildi (`split(";")`) ve bu makinedeki bond'ların tek teknolojili
-    biçimiyle uyumlu; **gerçek bir çift kipli cihazda ölçülmedi** — bu
-    makinede öyle bir cihaz yok.
+    BİÇİM ÖLÇÜLDÜ, ve cihaz gerekmedi (2026-09-04): BlueZ bu alanı elle
+    değil `g_key_file_set_string_list(file, "General",
+    "SupportedTechnologies", list, len)` ile yazıyor ve listeyi `bredr` →
+    `le` sırasında kuruyor (bluez 5.87 `device.c`, `update_technologies`).
+    GLib **her öğeden sonra** ayırıcıyı basıyor; aynı sürümün GLib'i bu
+    makinede koşturuldu: iki öğe → `BR/EDR;LE;`, tek öğe → `BR/EDR;` /
+    `LE;`. Son ikisi bu makinedeki gerçek bond dosyalarıyla birebir aynı,
+    yani sıra ve sondaki `;` tahmin değil. Aynı fonksiyon `AddressType`i de
+    **yalnız** `le` dalında yazıyor — buradaki koşul onunla aynı.
+
+    KALAN KAPSAM: gerçek bir çift kipli cihazda **uçtan uca sınanmadı** (bu
+    makinede öyle bir cihaz yok, kullanıcıda da). Açık kalan biçim değil
+    davranış: BlueZ'in dosyayı okuyup cihazın iki teknolojiyle de bağlanması.
     """
     from winbond import as_uint, key_hex
 

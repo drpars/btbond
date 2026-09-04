@@ -158,8 +158,15 @@ tarafında karşılığı **tek** `info` dosyası: `[LinkKey]` ve `[LongTermKey]
 yan yana, `SupportedTechnologies=BR/EDR;LE;`. `bluezbond.bond_info` bu satırın
 tek sahibi ve değeri eldekinden türetiyor. Ölçüldü (2026-09-04): daha önce iki
 ayrı döngü aynı dosyaya iki kez yazıyor ve LE yazımı `[LinkKey]`i **siliyordu**
-— hata yok, çıkış kodu 0. Gerçek bir çift kipli cihazda **sınanmadı**, bu
-makinede öyle bir cihaz yok.
+— hata yok, çıkış kodu 0.
+
+Satırın biçimi tahmin değil: BlueZ bu alanı `g_key_file_set_string_list` ile
+yazıyor ve listeyi `BR/EDR` → `LE` sırasında kuruyor (5.87 `device.c`,
+`update_technologies`); GLib her öğeden sonra ayırıcıyı bastığı için iki öğe
+`BR/EDR;LE;` veriyor. Tek öğeli karşılıkları (`BR/EDR;`, `LE;`) gerçek bond
+dosyalarıyla birebir aynı. **Gerçek bir çift kipli cihazda uçtan uca
+sınanmadı** — açık kalan biçim değil, BlueZ'in dosyayı okuyup cihazın iki
+teknolojiyle de bağlanması.
 
 **Bayt sırası aynı** — `REG_BINARY` baytları BlueZ'in hex dizesine olduğu gibi
 yazılır, ters çevrilmez (`--key-order asis`, ölçüldü: iki cihaz da bağlandı).
