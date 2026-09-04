@@ -100,6 +100,25 @@ HKLM\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\
                   PriLangServiceName = 256 bayt SIFIR (ölçüldü)
 ```
 
+**`LEFlags` cihaza göre değişiyor ve TÜRETİLEMEDİ** — ölçüldü:
+
+| cihaz | değer | bitler |
+|---|---|---|
+| Xbox Wireless Controller | `0x10030000` | 16, 17, **28** |
+| ROG GLADIUS III WL | `0x000B0000` | 16, 17, **19** |
+
+Aynı alt anahtardaki diğer beş alan iki cihazda **birebir aynı**. Bit 28 için
+*"LE Secure Connections"* / *"IRK var"* / *"public adres"* adaylarının üçü de
+aynı veriyi açıklıyor, bit 19 için *"legacy"* / *"CSRK var"* / *"random adres"*
+de öyle — çünkü iki cihazın bütün LE özellikleri **birlikte** farklı ve n=2'de
+hiçbir bit tek bir özelliğe bağlanamıyor. Ayırmak üçüncü bir LE cihaz ister.
+
+Bu yüzden araç **sabit yazmıyor** (bir cihazın değerini bir başkasına yazmak
+ölçülmüş biçimde yanlış olurdu). Sıra: `--le-flags` verildiyse o, **hedefte
+varsa korunur**, ikisi de yoksa alan **hiç yazılmaz** — ve hangisi olduğu
+rapor satırında yazılı. Alanın yokluğunun neyi bozduğu da ölçülmedi, o yüzden
+sessiz kalınmıyor.
+
 **Bond iki parçalıdır, ve ikisi de gerekir.** `Keys` kriptoyu taşır; `Devices`
 cihaz kaydını. Yalnız `Keys` yazıldığında Windows cihazı **`paired` gösterir**
 ve yazılan anahtarla **gerçek bir kimlik doğrulamalı bağlantı kurar** — ama

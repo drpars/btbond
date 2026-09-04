@@ -92,7 +92,7 @@ lines = "\n".join([
     f"V\t{BASE}\\Devices\\{DEV_HEX}\tName\tBinary\t" + b"Test\x00".hex(),
     f"V\t{BASE}\\Devices\\{DEV_HEX}\tLEAddressType\tDWord\t1",
 ])
-adapters, names, devices = winbond.collect(winbond.parse_dump(lines))
+adapters, names, devices, _svc = winbond.collect(winbond.parse_dump(lines))
 check("adaptör bulundu", list(adapters), ["00:11:22:33:44:55"])
 entry = adapters["00:11:22:33:44:55"]
 check("CentralIRK bond sayılmıyor", list(entry["bredr"]), [DEV_MAC])
@@ -103,6 +103,46 @@ check("guest_state iki tekniği birleştiriyor", rows[DEV_MAC]["tech"], "BR/EDR+
 check("LTK parmak izi", rows[DEV_MAC]["fp"]["LTK"], winbond.fingerprint("33" * 16))
 check("LEAddressType Devices'ten çözülüyor",
       winbond.le_address_type({}, devices[DEV_MAC]), (1, "Devices"))
+
+print("\n=== LEFlags: sabit YOK, ya korunur ya verilir ya yazılmaz ===")
+# Ölçüldü (2026-09-04): Xbox 0x10030000, fare 0x000B0000 — cihaza göre
+# değişiyor ve n=2'de hangi bitin neye bağlı olduğu ayrıştırılamıyor. Sabit
+# yazmak ölçülmüş biçimde YANLIŞ olurdu → `winbond.LEFLAGS_NOTU`.
+check("sabit kümede LEFlags YOK", "LEFlags" in winbond.LE_SERVICE_FLAGS, False)
+
+svc = {(DEV_MAC, "00:11:22:33:44:55"): {"LEFlags": "268632064"},
+       ("AA:BB:CC:DD:EE:02", "00:11:22:33:44:55"): {"LEFlags": "-1"}}
+check("hedefteki değer okunuyor",
+      winbond.existing_le_flags(svc, DEV_MAC, "00:11:22:33:44:55"), 0x10030000)
+check("işaretli gösterim işaretsize çevriliyor",
+      winbond.existing_le_flags(svc, "AA:BB:CC:DD:EE:02", "00:11:22:33:44:55"),
+      0xFFFFFFFF)
+check("hedefte yoksa None",
+      winbond.existing_le_flags(svc, "AA:BB:CC:DD:EE:03", "00:11:22:33:44:55"), None)
+check("adaptör tutmazsa None",
+      winbond.existing_le_flags(svc, DEV_MAC, "FF:FF:FF:FF:FF:FF"), None)
+
+# `collect` bu alt anahtarı eskiden SESSİZCE düşürüyordu (`len(parts) == 2`
+# süzgeci), yani hedefin kendi değeri modelde hiç görünmüyordu.
+svc_lines = "\n".join([
+    f"V\t{BASE}\\Devices\\{DEV_HEX}\\ServicesFor{ADAPTER_HEX}\tLEFlags\tDWord\t720896",
+    f"V\t{BASE}\\Devices\\{DEV_HEX}\\ServicesFor{ADAPTER_HEX}\tBasebandSupport\tDWord\t32768",
+])
+_a, _n, _d, svc2 = winbond.collect(winbond.parse_dump(svc_lines))
+check("collect ServicesFor'u yakalıyor",
+      winbond.existing_le_flags(svc2, DEV_MAC, "00:11:22:33:44:55"), 0x000B0000)
+
+# Emitör: verilmezse alan HİÇ yazılmaz, verilirse yazılır.
+def _has_leflags(ops):
+    return any(op[0] == winbond.DW and op[2] == "LEFlags" for op in ops)
+
+
+check("le_flags=None -> alan yazılmıyor",
+      _has_leflags(winbond.device_record_ops(
+          "00:11:22:33:44:55", DEV_MAC, "", True, {}, [])), False)
+check("le_flags verilince yazılıyor",
+      _has_leflags(winbond.device_record_ops(
+          "00:11:22:33:44:55", DEV_MAC, "", True, {}, [], le_flags=0x000B0000)), True)
 
 print("\n=== hivebond.find_system_hive: ölçüt NTFS değil, DOSYA ===")
 for label, target in (("Windows olmayan dizin", "/tmp"),

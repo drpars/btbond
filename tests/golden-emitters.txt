@@ -73,7 +73,6 @@ Ensure-Key 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\a
 Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455' 'AuthenticationRequirementsLE' 3
 Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455' 'BasebandSupport' 32768
 Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455' 'IoCapabilityLE' 255
-Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455' 'LEFlags' 268632064
 Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455' 'RemoteAuthenticationRequirementsLE' 255
 Set-Qw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455' 'LEExtendedDeviceInfoFlags' 0
 'OK record aabbccddeeff'
@@ -85,8 +84,19 @@ Ensure-Key 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\a
 Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455' 'AuthenticationRequirementsLE' 3
 Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455' 'BasebandSupport' 32768
 Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455' 'IoCapabilityLE' 255
-Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455' 'LEFlags' 268632064
 Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455' 'RemoteAuthenticationRequirementsLE' 255
+Set-Qw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455' 'LEExtendedDeviceInfoFlags' 0
+'OK record aabbccddeeff'
+===== 05b record LE + LEFlags verildi =====
+Ensure-Key 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff'
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff' 'DibServiceVersion' 131072
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff' 'LocalEvaldIoCapLE' 4
+Ensure-Key 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455'
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455' 'AuthenticationRequirementsLE' 3
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455' 'BasebandSupport' 32768
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455' 'IoCapabilityLE' 255
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455' 'RemoteAuthenticationRequirementsLE' 255
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455' 'LEFlags' 720896
 Set-Qw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455' 'LEExtendedDeviceInfoFlags' 0
 'OK record aabbccddeeff'
 ===== 06 le tam =====

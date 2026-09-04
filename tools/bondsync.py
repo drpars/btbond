@@ -220,7 +220,7 @@ def survey(domain=DEFAULT_DOMAIN, root=bluezbond.ROOT, usb_id=DEFAULT_USB_ID):
     exitcode, stdout, stderr = run_powershell(domain, winbond.DUMP_POWERSHELL)
     if exitcode != 0:
         raise RuntimeError(f"misafir okuma komutu exitcode={exitcode}\n{stderr}")
-    adapters, names, devices = winbond.collect(winbond.parse_dump(stdout))
+    adapters, names, devices, _svc = winbond.collect(winbond.parse_dump(stdout))
 
     host_adapters = bluezbond.list_adapters(root)
     # Hangi adaptör? Misafir ve host aynı radyoyu paylaştığı için normalde tek

@@ -58,6 +58,12 @@ def cases():
     yield "05 record LE minimal", winbond.device_record_script(
         ADAPTER, DEV, "", True, {}, [], None)
 
+    # `LEFlags` iki dallı: verilmezse **hiç yazılmaz** (vaka 04/05), verilirse
+    # yazılır. Sabit yazmak ölçülmüş biçimde yanlış olurdu, çünkü değer cihaza
+    # göre değişiyor ve n=2'de türetilemedi → `winbond.LEFLAGS_NOTU`.
+    yield "05b record LE + LEFlags verildi", winbond.device_record_script(
+        ADAPTER, DEV, "", True, {}, [], None, le_flags=0x000B0000)
+
     yield "06 le tam", winbond.le_script(ADAPTER, DEV, {
         "LTK": "aa" * 16, "IRK": "bb" * 16, "KeyLength": 16, "EDIV": 12345,
         # Üst biti dolu QWORD: PowerShell onu işaretli basar ve `as_uint`

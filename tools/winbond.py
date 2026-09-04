@@ -67,21 +67,44 @@ BREDR_SERVICE_FLAGS = {
     "BRFlags": 0,
 }
 
-# `LEFlags` CİHAZA GÖRE DEĞİŞİYOR — ölçüldü (2026-09-04), ve dördüncü alan
-# değişmiyor: Xbox kolunda `268632064` (0x10030000), ROG faresinde `720896`
-# (0x000B0000); aynı iki cihazda `AuthenticationRequirementsLE`,
-# `RemoteAuthenticationRequirementsLE`, `IoCapabilityLE` ve `BasebandSupport`
-# birebir aynı. Yani buradaki sabit yalnız Xbox'ın değeri; nasıl türetildiği
-# BİLİNMİYOR ve BlueZ'de karşılığı aranmadı. Fare henüz ters yönde
-# yazılmadığı için yanlış `LEFlags`in neyi bozduğu da ölçülmedi.
-# Farenin kaydında ayrıca `LEExtendedDeviceInfoFlags = 0` var (burada yok).
+# `LEFlags` BU SÖZLÜKTE DEĞİL, ve bu bilinçli bir eksiklik → `LEFLAGS_NOTU`.
+# Buradakiler iki LE cihazında **birebir aynı** ölçüldü (2026-09-04), yani
+# sabit olmaları gözleme dayanıyor.
 LE_SERVICE_FLAGS = {
     "AuthenticationRequirementsLE": 3,
     "RemoteAuthenticationRequirementsLE": 255,
     "IoCapabilityLE": 255,
     "BasebandSupport": 32768,
-    "LEFlags": 268632064,
 }
+
+# `LEFlags` CİHAZA GÖRE DEĞİŞİYOR, ve TÜRETİLEMEDİ — ölçüldü (2026-09-04,
+# canlı misafirde `Devices\<mac>\ServicesFor<adaptör>` altında):
+#
+#     Xbox Wireless Controller : 268632064 = 0x10030000  bitler {16,17,28}
+#     ROG GLADIUS III WL       :    720896 = 0x000B0000  bitler {16,17,19}
+#
+# Ortak {16,17}; ayrışan yalnız Xbox'ta 28, yalnız farede 19. Aynı alt
+# anahtardaki diğer beş alan (`AuthenticationRequirementsLE`,
+# `RemoteAuthenticationRequirementsLE`, `IoCapabilityLE`, `BasebandSupport`,
+# `LEExtendedDeviceInfoFlags`) iki cihazda birebir aynı.
+#
+# NEDEN TÜRETİLEMİYOR — iki cihazın bütün LE özellikleri **birlikte** farklı,
+# yani n=2'de hiçbir bit tek bir özelliğe bağlanamıyor: Xbox LE Secure
+# Connections (EDIV/ERand=0), IRK dağıtıyor, public adres, CSRK yok,
+# `CEntralIRKStatus=1`; fare LE **legacy** (EDIV≠0), IRK **yok**, random
+# adres, CSRK **var**, `CEntralIRKStatus=0`. Bit 28 için "LESC" / "IRK var" /
+# "public adres" adaylarının üçü de aynı veriyi açıklıyor; bit 19 için
+# "legacy" / "CSRK var" / "random adres" de öyle. Ayırmak üçüncü bir LE
+# cihaz ister ve elde yok.
+#
+# BU YÜZDEN SABİT YAZILMIYOR. Xbox'ın değerini fareye yazmak ÖLÇÜLMÜŞ biçimde
+# yanlış olurdu. Sıra: (1) hedefte varsa **korunur**, (2) kullanıcı
+# `--le-flags` ile verirse yazılır, (3) ikisi de yoksa **hiç yazılmaz** ve
+# bu raporlanır. Yokluğun neyi bozduğu da ölçülmedi — o yüzden sessiz
+# kalmıyor, söyleniyor.
+LEFLAGS_NOTU = ("LEFlags cihaza göre değişiyor ve n=2'de türetilemedi; "
+                "sabit yazmak yerine korunur/verilir/atlanır")
+LEFLAGS_FIELD = "LEFlags"
 
 # Windows'un her iki teknolojide de yazdığı sabitler.
 DIB_SERVICE_VERSION = 131072
@@ -331,19 +354,38 @@ def collect(tree):
 
     Döner: ({adaptör-mac: {"bredr": {...}, "le": {...}, "central_irk": ...}},
             {cihaz-mac: ad},
-            {cihaz-mac: {`Devices\\<mac>` alanları}})
+            {cihaz-mac: {`Devices\\<mac>` alanları}},
+            {(cihaz-mac, adaptör-mac): {`ServicesFor<adaptör>` alanları}})
 
     Üçüncü sözlük `Keys`te bulunmayan ama bond'un anlamını taşıyan alanlar
     için: `LEAddressType` orada duruyor ve bazı cihazlarda `Keys` karşılığı
     hiç yazılmıyor → `le_address_type`.
+
+    DÖRDÜNCÜSÜ 2026-09-04'te eklendi ve tek bir şey için var: `LEFlags` cihaza
+    göre değişiyor ve türetilemiyor, yani hedefte bir değer varsa
+    **korunabilmesi** gerekiyor → `LEFLAGS_NOTU`. Eskiden bu alt anahtar
+    `collect`te sessizce düşüyordu (`len(parts) == 2` süzgeci), yani hedefin
+    kendi değeri modelde hiç görünmüyordu.
     """
     adapters = {}
     names = {}
     devices = {}
+    service_flags = {}
 
     for path, values in tree.items():
         parts = split_path(path)
         if not parts:
+            continue
+
+        # `Devices\<mac>\ServicesFor<adaptör>` — yaprak alt anahtarları
+        # (`{uuid}`, `C00000000`) BU DALDA DEĞİL: onlar dört parça ve üstü.
+        if (parts[0] == "Devices" and len(parts) == 3
+                and parts[2].lower().startswith("servicesfor")):
+            dev = mac_from_hex12(parts[1])
+            adapter = mac_from_hex12(parts[2][len("ServicesFor"):])
+            if dev and adapter:
+                service_flags[(dev, adapter)] = {
+                    name: value for name, (kind, value) in values.items()}
             continue
 
         if parts[0] == "Devices" and len(parts) == 2:
@@ -382,7 +424,17 @@ def collect(tree):
             entry = adapters.setdefault(adapter, {"bredr": {}, "le": {}, "central_irk": None})
             entry["le"][dev] = {name: value for name, (kind, value) in values.items()}
 
-    return adapters, names, devices
+    return adapters, names, devices, service_flags
+
+
+def existing_le_flags(service_flags, dev, adapter):
+    """Hedefte `LEFlags` varsa işaretsiz tamsayı olarak ver, yoksa `None`.
+
+    Değer `Set-Dw`in beklediği biçimde döner (işaretsiz): ajanın bastığı
+    gösterim işaretli olabilir → `as_uint`.
+    """
+    raw = service_flags.get((dev, adapter), {}).get(LEFLAGS_FIELD)
+    return None if raw is None else as_uint(raw, 32)
 
 
 def name_blob(name):
@@ -472,7 +524,8 @@ def bredr_script(adapter, dev, link_key_hex):
     return render_powershell(bredr_ops(adapter, dev, link_key_hex))
 
 
-def device_record_ops(adapter, dev, name, is_le, attrs, services, sdp_records=None):
+def device_record_ops(adapter, dev, name, is_le, attrs, services, sdp_records=None,
+                      le_flags=None):
     """`Devices\\<mac>` + `ServicesFor<adaptör>` kaydını yazan işlemler.
 
     `attrs`: BR/EDR için {"COD": int}; LE için {"LEAppearance", "LEAddressType",
@@ -506,6 +559,10 @@ def device_record_ops(adapter, dev, name, is_le, attrs, services, sdp_records=No
         ops.append((KEY, svc_path))
         for field, value in sorted(LE_SERVICE_FLAGS.items()):
             ops.append((DW, svc_path, field, value))
+        # `LEFlags` yalnız BİLİNİYORSA yazılıyor: sabit yazmak ölçülmüş
+        # biçimde yanlış olurdu → `LEFLAGS_NOTU`.
+        if le_flags is not None:
+            ops.append((DW, svc_path, LEFLAGS_FIELD, int(le_flags)))
         ops.append((QW, svc_path, "LEExtendedDeviceInfoFlags", 0))
     else:
         ops.append((DW, dev_path, "LocalEvaldIoCap", LOCAL_EVALD_IO_CAP))
@@ -537,10 +594,11 @@ def device_record_ops(adapter, dev, name, is_le, attrs, services, sdp_records=No
     return ops
 
 
-def device_record_script(adapter, dev, name, is_le, attrs, services, sdp_records=None):
+def device_record_script(adapter, dev, name, is_le, attrs, services, sdp_records=None,
+                         le_flags=None):
     """`device_record_ops`un PowerShell hâli."""
     return render_powershell(device_record_ops(
-        adapter, dev, name, is_le, attrs, services, sdp_records))
+        adapter, dev, name, is_le, attrs, services, sdp_records, le_flags))
 
 
 def le_ops(adapter, dev, bond):

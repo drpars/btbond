@@ -82,7 +82,7 @@ def batches(chunks, budget=BATCH_BUDGET):
 
 
 def guest_state(domain):
-    """Misafirdeki mevcut bond yapısını oku (adapters, names, devices)."""
+    """Misafirdeki mevcut durumu oku → `winbond.collect` dörtlüsü."""
     exitcode, stdout, stderr = run_powershell(domain, winbond.DUMP_POWERSHELL)
     if exitcode != 0:
         sys.exit(f"misafir okuma komutu exitcode={exitcode}\n{stderr}")
@@ -139,9 +139,17 @@ def le_attrs(info, adapter, dev, address_type, with_container):
     return attrs
 
 
-def plan(root, adapter, bonds, guest, only, order, authreq, force, container=True):
-    """Yazılacak işleri belirle. Döner: (parçalar, rapor satırları)."""
+def plan(root, adapter, bonds, guest, only, order, authreq, force, container=True,
+         guest_svc=None, le_flags_override=None):
+    """Yazılacak işleri belirle. Döner: (parçalar, rapor satırları).
+
+    `guest_svc`: hedefin `ServicesFor<adaptör>` alanları (→ `winbond.collect`).
+    `LEFlags` **cihaza göre değişiyor ve türetilemedi** → `winbond.LEFLAGS_NOTU`,
+    o yüzden sıra: kullanıcı verdiyse o, hedefte varsa **korunur**, ikisi de
+    yoksa **hiç yazılmaz** ve rapor bunu söyler.
+    """
     chunks, report = [], []
+    guest_svc = guest_svc or {}
     guest_entry = guest.get(adapter, {"bredr": {}, "le": {}, "central_irk": None})
 
     for dev, info in sorted(bonds.items()):
@@ -183,9 +191,19 @@ def plan(root, adapter, bonds, guest, only, order, authreq, force, container=Tru
                                    winbond.key_hex(irk, order).lower() if irk else None, order)
                 fields["LTK"] = winbond.key_hex(ltk, order).lower()
                 attrs = le_attrs(info, adapter, dev, fields["AddressType"], container)
+                # `LEFlags`: kullanıcı > hedefte var olan > hiç yazma.
+                existing = winbond.existing_le_flags(guest_svc, dev, adapter)
+                le_flags = le_flags_override if le_flags_override is not None else existing
+                if le_flags_override is not None:
+                    flags_note = f"LEFlags=0x{le_flags:08X} (--le-flags)"
+                elif existing is not None:
+                    flags_note = f"LEFlags=0x{existing:08X} (hedeften KORUNDU)"
+                else:
+                    flags_note = ("LEFlags=YAZILMIYOR (cihaza göre değişiyor, "
+                                  "türetilemedi; yokluğunun etkisi ölçülmedi)")
                 chunks.append(winbond.le_ops(adapter, dev, fields))
                 chunks.append(winbond.device_record_ops(
-                    adapter, dev, name, True, attrs, []))
+                    adapter, dev, name, True, attrs, [], le_flags=le_flags))
                 extra = ", ".join(f"{k}={fields[k]}" for k in
                                   ("KeyLength", "EDIV", "ERand", "AddressType",
                                    "AuthReq", "CEntralIRKStatus", "Address"))
@@ -196,6 +214,7 @@ def plan(root, adapter, bonds, guest, only, order, authreq, force, container=Tru
                 shown = {k: (f"{v[:8]}…" if k == "LeContainerId" else v)
                          for k, v in sorted(attrs.items()) if v is not None}
                 report.append(f"           [{', '.join(f'{k}={v}' for k, v in shown.items())}]")
+                report.append(f"           {flags_note}")
 
         if not link_key and not ltk:
             report.append(f"  ATLANDI {dev}  \"{name}\"  — anahtar bölümü yok "
@@ -234,6 +253,13 @@ def main():
                         help="misafirde zaten olan bond'un üzerine yaz")
     parser.add_argument("--no-container-id", action="store_true",
                         help="LE cihaz kaydına `LeContainerId` yazma (gerekliliği ölçülmedi)")
+    # `LEFlags` cihaza göre değişiyor ve n=2'de TÜRETİLEMEDİ
+    # (→ `winbond.LEFLAGS_NOTU`). Sabit yazmak ölçülmüş biçimde yanlış olurdu,
+    # o yüzden değer ya hedeften korunur ya buradan verilir ya hiç yazılmaz.
+    parser.add_argument("--le-flags", type=lambda v: int(v, 0), metavar="DEĞER",
+                        help="LE cihaz kaydına yazılacak `LEFlags` (0x… kabul "
+                             "edilir); verilmezse hedefteki korunur, o da "
+                             "yoksa alan hiç yazılmaz")
     parser.add_argument("--remove", action="store_true",
                         help="yazma; misafirdeki bond'ları sil (--only ile daraltılır)")
     parser.add_argument("--dry-run", action="store_true",
@@ -271,10 +297,11 @@ def main():
     # Yanlış kanaldan okumak `ATLANDI`/`ÜZERİNE YAZILIYOR` hükmünü sessizce
     # tersine çevirirdi.
     if args.offline:
-        guest, _guest_names, _guest_devices, hive_meta = hivebond.read_bonds(args.offline)
+        guest, _guest_names, _guest_devices, guest_svc, hive_meta = \
+            hivebond.read_bonds(args.offline)
         print(f"offline kovan {hive_meta['hive']}  ({hive_meta['control_set']})")
     else:
-        guest, _guest_names, _guest_devices = guest_state(args.domain)
+        guest, _guest_names, _guest_devices, guest_svc = guest_state(args.domain)
     print(f"adaptör {adapter}  (host bond: {len(bonds)})")
     if adapter not in guest:
         print("  misafirde bu adaptörün anahtarı YOK — ilk yazımda oluşturulacak.")
@@ -291,7 +318,9 @@ def main():
     else:
         chunks, report = plan(args.root, adapter, bonds, guest, only,
                               args.key_order, args.authreq, args.force,
-                              container=not args.no_container_id)
+                              container=not args.no_container_id,
+                              guest_svc=guest_svc,
+                              le_flags_override=args.le_flags)
 
     for line in report:
         print(line)

@@ -113,7 +113,7 @@ def main():
     if exitcode != 0:
         sys.exit(f"misafir komutu exitcode={exitcode}\n{stderr}")
 
-    adapters, names, devices = winbond.collect(winbond.parse_dump(stdout))
+    adapters, names, devices, _svc = winbond.collect(winbond.parse_dump(stdout))
     if not adapters:
         sys.exit("misafirde hiç bond yok (Keys altında adaptör anahtarı bulunamadı)")
 

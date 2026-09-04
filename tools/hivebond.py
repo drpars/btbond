@@ -171,11 +171,16 @@ def dump(target):
 
 
 def read_bonds(target):
-    """Offline kovandan `winbond.collect` üçlüsünü ver — model katmanı için."""
+    """Offline kovandan `winbond.collect` çıktısını + meta'yı ver.
+
+    Döner: `(adapters, names, devices, service_flags, meta)` — `collect`in
+    dörtlüsü artı kovan/set bilgisi. `service_flags` `LEFlags`in korunabilmesi
+    için gerekiyor → `winbond.LEFLAGS_NOTU`.
+    """
     text, hive_path, control_set = dump(target)
-    adapters, names, devices = winbond.collect(winbond.parse_dump(text))
-    return adapters, names, devices, {"hive": str(hive_path),
-                                      "control_set": control_set}
+    adapters, names, devices, service_flags = winbond.collect(winbond.parse_dump(text))
+    return adapters, names, devices, service_flags, {"hive": str(hive_path),
+                                                     "control_set": control_set}
 
 
 # --- YAZMA -----------------------------------------------------------------
@@ -403,7 +408,7 @@ def main():
         print(text)
         return 0
 
-    adapters, names, _devices, meta = read_bonds(args.target)
+    adapters, names, _devices, _svc, meta = read_bonds(args.target)
     print(f"kovan   : {meta['hive']}")
     print(f"set     : {meta['control_set']}")
     if not adapters:
