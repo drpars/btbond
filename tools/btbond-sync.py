@@ -64,9 +64,6 @@ WRITER = {
     "to-guest": HERE / "bluez-to-win.py",
 }
 
-# Yazmadan ÖNCE radyonun bulunmaması gereken taraf. Kapının kendisi.
-FORBIDDEN_SIDE = {"to-host": "host", "to-guest": "guest"}
-
 VERDICT_LABEL = {
     bondsync.MATCH: "eşleşiyor",
     bondsync.HOST_ONLY: "yalnız host'ta",
@@ -310,27 +307,13 @@ def run_phase(args, state, direction, blocked_devs=()):
         print(f"  yapılacak bir şey yok ({DIRECTION_ARROW[direction]}).")
         return 0
 
-    side = FORBIDDEN_SIDE[direction]
-    here = state["radio"][side]
     print(f"  {DIRECTION_ARROW[direction]}  ({len(rows)} cihaz)")
 
-    # KAPI: hedef taraf radyoyu tutuyorsa yazma etkisiz kalır.
-    #
-    # ÇOKLU DOMAIN'DE DE DOĞRU, ve bu tesadüf değil: kapının sorduğu şey
-    # "radyo nerede" değil, "**hedef** onu tutuyor mu". Misafir kanalı
-    # yalnız adı verilen domain'in XML'ini okuduğu için ölçü tam o soruyu
-    # cevaplıyor — radyo ÜÇÜNCÜ bir domain'de olsa `guest=False` doğrudur,
-    # çünkü hedef Windows'un `BTHPORT` sürücüsü koşmuyor ve yazım o taraf
-    # radyoyu aldığında okunacak. Buradaki `radio[side]`i "radyonun yeri"
-    # sanıp düzeltmeye kalkmayın; düzeltilmesi gereken yer `where`
-    # dizesinin KAPSAMI idi ve o ayrıca yazıldı (`bondsync.radio_where`).
-    if here:
-        print(f"  DURDU: hedef ({side}) radyoyu tutuyor. Bu sırada yazmak hata "
-              f"vermez, sessizce etkisiz kalır — önce radyo öbür tarafa alınır.")
-        return 1
-    if here is None:
-        print(f"  DURDU: hedefin ({side}) radyoyu tutup tutmadığı ÖLÇÜLEMEDİ; "
-              f"kapı varsayımla geçilmez.")
+    # KAPI — ölçüsü ve gerekçesi `bondsync.write_gate`de, TEK sahipte: aynı
+    # kapıyı TUI de çağırıyor ve iki kopya tutulsaydı biri donardı.
+    allowed, reason = bondsync.write_gate(state["radio"], direction)
+    if not allowed:
+        print(f"  DURDU: {reason}")
         return 1
 
     # `--root` yazıcıya MUTLAKA geçer: geçmezse test kopyasına karşı

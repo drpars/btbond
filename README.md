@@ -374,15 +374,63 @@ baytları aynen sunuyor. Kalan boşluk: yazımdan sonra radyo o misafire hiç
 verilmediği için **cihazların fiilen bağlandığı** görülmedi, ve **dual boot**
 kolu (domain yerine disk yolu) hiç koşmadı.
 
+## TUI
+
+```
+sudo tools/btbond-tui.py [--domain AD]...
+```
+
+**Bir yön sihirbazı değil, bir diff görünümü.** Açılışta "nereden nereye" diye
+sorulmuyor: yönü veri söylüyor, ve global bir yön kipi tam o tek belirsizlikte
+(`ANAHTAR FARKLI`) yeniyi eskiyle sessizce ezerdi. Satır başına hüküm, satırın
+ima ettiği yön, ve `Enter` o yönde replikasyon. Ayrışan satırda `Enter`
+**iki parmak izini ekrana koyup sorar** — karar verebilmek için gereken iki
+değer ancak orada yan yana durur.
+
+| tuş | ne yapar |
+|---|---|
+| `r` | tazele (taraf başına ~1 sn) |
+| `d` | seçili satırın ayrıntısı (parmak izleri, adres tipi) |
+| `Enter` | satırın ima ettiği yönde replike et — kapıdan geçerse |
+| `?` / `q` | yardım / çık |
+
+**Tazeleme açık ve bloklamıyor, çünkü ölçüldü:**
+
+| yarı | süre |
+|---|---|
+| host (dosyalar) | **0,6 ms** |
+| radyonun yeri (iki kanal) | 14 ms |
+| misafir (`guest-exec` turu) | **1073 ms** |
+
+Misafir yarısı ~1800× baskın, yani bluetui'nin canlı D-Bus okuması burada
+**taklit edilemez**. Ölçüm bir iş parçacığında koşuyor ve başlık verinin hangi
+saatte alındığını söylüyor; bir yazımdan sonra tablo **BAYAT** işaretlenir
+(kendiliğinden tazelenmez — bir saniyelik tur, ve ekranda hangi verinin
+durduğu bilinmek zorunda).
+
+Kapı TUI'de **yeniden yazılmadı**: `bondsync.write_gate` çağrılıyor, aynı
+fonksiyon `btbond-sync.py`nin fazlarını da kesiyor. İki kopya tutulsaydı biri
+donar, ve donmuş olan yıkıcı tarafta durur.
+
+Toolkit **Textual** (Python), ve sebebi mimari: uygulama modeli `import`
+ediyor, yani `--json` şeklinin ikinci bir tüketicisi ve düzenin/kapının ikinci
+bir sahibi doğmuyor. Rust/Ratatui bir süreç sınırı ve bir ayrıştırıcı daha
+eklerdi.
+
 ## Testler
 
-Misafir, root ve kovan gerektirmeyen iki sözleşme testi:
+Misafir, root, terminal ve kovan gerektirmeyen üç sözleşme testi:
 
 ```
 tests/test_emitters.py       # altın çıktı: yazma emitörleri aynı metni üretiyor mu
 tests/test_transport.py      # taşıyıcı ve model sözleşmeleri
+tests/test_tui.py            # TUI kararları (Textual'ın başsız sürücüsü)
 tests/test_emitters.py --update   # altın dosyayı KASITLI olarak yenile
 ```
+
+TUI testi arayüzün **kararlarını** ölçüyor, çizimini değil: hükümler modelden
+mi geliyor, kapı yıkıcı yolu kesiyor mu, `ANAHTAR FARKLI` kendiliğinden
+koşmuyor mu, ve yazımdan sonra tablo bayat işaretleniyor mu.
 
 **Neden altın çıktı.** Yazma emitörleri artık PowerShell metni değil, yazma
 **işlemleri** (IR) üretiyor; renderer'lar onu metne çeviriyor. Ayrımın amacı
@@ -429,7 +477,8 @@ MIT → [LICENSE](LICENSE).
       random — hiçbiri dönen adres kullanmıyor, yani kol hâlâ ölçülmedi)
 - [x] Tek komutluk akış (`btbond-sync.py status` / `sync`) — yön satırın
       özelliği, yazma sırası kapı olarak uygulanıyor
-- [ ] TUI
+- [x] TUI (`btbond-tui.py`) — diff görünümü, açık/bloklamayan tazeleme,
+      kapı tek sahipten; toolkit kararı Textual (model import edilir)
 - [x] Offline kovan **okuma** arka ucu (`hivebond.py`) — kapalı misafir ve
       dual boot; iki taraflı doğrulandı (altı parmak izi ajanla birebir aynı),
       bölüm ve qcow2 kolları ayrı ayrı koştu

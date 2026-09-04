@@ -65,6 +65,39 @@ VERDICT_DIRECTION = {
 }
 
 
+# Yazmadan ÖNCE radyonun bulunmaması gereken taraf. Kapının ölçüsü.
+FORBIDDEN_SIDE = {"to-host": "host", "to-guest": "guest"}
+
+
+def write_gate(radio, direction):
+    """Bu yönde yazmak ETKİLİ olur mu? Döner: `(izin, sebep)`.
+
+    Kapının sorduğu şey *"radyo nerede"* değil, *"**hedef** onu tutuyor mu"* —
+    hedef taraf radyoyu tutarken yazmak hata vermez, **sessizce etkisiz
+    kalır** (BlueZ bond'ları adaptör kurulurken okur, Windows `BTHPORT`
+    sürücü başlarken). Ölçemediğinde de durur: varsayımla geçilmez.
+
+    ÇOKLU DOMAIN'DE DE DOĞRU: misafir kanalı yalnız adı verilen domain'in
+    XML'ini okuduğu için ölçü tam o soruyu cevaplıyor — radyo ÜÇÜNCÜ bir
+    domain'de olsa `guest=False` doğrudur, çünkü hedef Windows'un sürücüsü
+    koşmuyor ve yazım o taraf radyoyu aldığında okunacak.
+
+    TEK SAHİP: bu fonksiyon `btbond-sync.run_phase` ve TUI tarafından
+    **birlikte** çağrılıyor. İki kopya tutulsaydı biri ilerler, öbürü donar
+    ve donmuş olan yıkıcı tarafta durur.
+    """
+    side = FORBIDDEN_SIDE[direction]
+    here = radio[side]
+    if here:
+        return False, (f"hedef ({side}) radyoyu tutuyor. Bu sırada yazmak hata "
+                       f"vermez, sessizce etkisiz kalır — önce radyo öbür "
+                       f"tarafa alınır.")
+    if here is None:
+        return False, (f"hedefin ({side}) radyoyu tutup tutmadığı ÖLÇÜLEMEDİ; "
+                       f"kapı varsayımla geçilmez.")
+    return True, f"hedef ({side}) radyoyu tutmuyor"
+
+
 def other_domains(domain, uri="qemu:///system"):
     """`domain` dışında TANIMLI domain adları; ölçülemezse `None`.
 
