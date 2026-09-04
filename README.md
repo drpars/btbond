@@ -17,7 +17,12 @@ one radio, so your devices keep working on whichever side currently owns it.
 > eşleştirmesiz bağlandı ve HID cihazı olarak göründü. BR/EDR'de bond, kimlik
 > doğrulaması ve SDP çalışıyor; ama Windows profil devnode'larını (A2DP, AVRCP,
 > HFP) ancak cihazdan **öğrenilen** dört alanı bildiğinde kuruyor ve o alanlar
-> BlueZ dosyalarında yok → "Bilinen boşluk". TUI henüz yok.
+> BlueZ dosyalarında yok → "Bilinen boşluk".
+>
+> **Offline kovan kanalı da koştu** (2026-09-04): kapalı bir misafirin kovanı
+> okunuyor **ve yazılıyor** — üç bond offline yazıldı, misafir açıldı ve
+> Windows'un kendi kayıt defteri üçünü de aynen verdi. TUI var
+> (`btbond-tui.py`) ve kapalı tarafları da gösteriyor.
 
 ---
 
@@ -49,11 +54,12 @@ boot prensipte imkânsız olurdu.
 `NT AUTHORITY\SYSTEM` olarak koşar, ve `HKLM\SYSTEM\CurrentControlSet\Services\
 BTHPORT\Parameters` tam olarak SYSTEM'e açık bir anahtardır. Sonuç: misafiri
 **kapatmadan**, diski **rebind etmeden**, şifrelemeye **hiç dokunmadan**
-okunup yazılabiliyor. Bugün yazma yolu **yalnız** bunda var.
+okunup yazılabiliyor.
 
-**Offline kovan** (`hivebond.py`) kapalı misafir ve dual boot için —
-şu an **salt-okuma**. Zincir: domain kapalı → disk host'ta → bölüm mount →
-`hivex` → `ControlSet00N\Services\BTHPORT\Parameters`.
+**Offline kovan** (`hivebond.py`) kapalı misafir ve dual boot için — **okuma ve
+yazma**. Zincir: domain kapalı → disk host'ta → bölüm mount → `hivex` →
+`ControlSet00N\Services\BTHPORT\Parameters`. Yazma yönü bugün yalnız
+Linux → Windows (`bluez-to-win.py --offline`); ters yön offline'a bağlanmadı.
 
 Ajanın tek gerçek üstünlüğü **diske erişmek zorunda olmaması** — hız değil,
 çünkü koşan Windows'a yazılan anahtar da ancak `BTHPORT` sürücüsü başlarken
@@ -377,7 +383,7 @@ kolu (domain yerine disk yolu) hiç koşmadı.
 ## TUI
 
 ```
-sudo tools/btbond-tui.py [--domain AD]...
+sudo tools/btbond-tui.py [--domain AD]... [--offline DOMAIN=MOUNT]...
 ```
 
 **Bir yön sihirbazı değil, bir diff görünümü.** Açılışta "nereden nereye" diye
@@ -392,7 +398,39 @@ değer ancak orada yan yana durur.
 | `r` | tazele (taraf başına ~1 sn) |
 | `d` | seçili satırın ayrıntısı (parmak izleri, adres tipi) |
 | `Enter` | satırın ima ettiği yönde replike et — kapıdan geçerse |
+| `s` | **topla + dağıt** (iki fazlı akış, kapsamın tamamı) |
+| `h` | **radyoyu devret** (seçili satırın domain'i) |
 | `?` / `q` | yardım / çık |
+
+**Yetenek eşitliği — ölçüt "birebir aynı" değil.** Duruma bakarak verilen bir
+karar CLI'a özel kalmaz; bir *ölçüm kolu* ise CLI'da kalır. O yüzden TUI'de
+offline taraf, iki fazlı akış ve devir **var**; `--json` (makine çıktısı) ve
+`--key-order` / `--authreq` / `--le-flags` (ölçülmemiş kolları açan deney
+bayrakları) **yok** — onları tek tuşa bağlamak kullanıcıya ölçülmemiş bir şeyi
+yaptırmak olurdu.
+
+`s` ve `h` mantığı TUI'de **yeniden yazılmadı**: `btbond-sync.py` çağrılıyor,
+tıpkı onun yazıcıları çağırdığı gibi. Faz sırası, faz arası yeniden ölçüm ve
+devrin `vfioctl` çağrısı tek sahipte kalıyor.
+
+**Kapalı taraf da görünür, ve üç durum ayrı:**
+
+| satır | ne demek |
+|---|---|
+| `eşleşiyor` / `yalnız …` | taraf **okundu** (ajan ya da kovan) |
+| `ÖLÇÜLMEDİ (kapalı)` | taraf **var**, diski bulundu, içeriği okunmadı |
+| `ULAŞILAMADI` | disk da bulunamadı |
+
+Ortadaki satır *"bond yok"* ile *"ölçmedim"*i ayırıyor, ve disk yolunu
+gösteriyor. Disk keşfi salt-okuma: imaj dosyası domain XML'inden, PCI
+passthrough ise `/sys/bus/pci/devices/<adres>/nvme/*/nvme*n*` üzerinden
+(bu makinede `0000:02:00.0` → `/dev/nvme1n1`, yalnız domain **kapalıyken**;
+koşarken cihaz `vfio-pci`'de). Kapsam: yalnız NVMe.
+
+**Mount otomatik DEĞİL, ve bilerek:** bağlama zinciri ayrıcalıklı ve durumlu
+(`qemu-nbd` + `partprobe` + `mount`), araç ortasında çökerse geriye bağlı bir
+nbd ve mount'lu bir dosya sistemi kalır. O yüzden araç tarafı **gösteriyor**,
+bağlamayı kullanıcı yapıyor ve `--offline DOMAIN=MOUNT` ile veriyor.
 
 **Tazeleme açık ve bloklamıyor, çünkü ölçüldü:**
 
@@ -494,8 +532,12 @@ MIT → [LICENSE](LICENSE).
       çıktı denkliğiyle: refactor öncesi/sonrası metin **birebir aynı**
 - [x] `collect` + `distribute` iki fazlı akış (host kanonik kopya), fazlar
       arası yeniden ölçümle — tek döngülü biçim N≥2 tarafta yakınsamıyordu
-- [ ] Offline taraf `status`ta görünsün — domain'in diskini kendi bulup
-      mount etmesi gerekiyor (bugün mount elle yapılıyor)
+- [x] Offline taraf `status`ta ve TUI'de görünür (`--offline DOMAIN=MOUNT`),
+      diski keşfediliyor, ve okunmamış taraf `ÖLÇÜLMEDİ` diye ayrılıyor
+- [ ] Mount otomasyonu (`qemu-nbd` + `mount` + garantili temizlik) — bugün
+      bağlamayı kullanıcı yapıyor
+- [ ] Ters yönde offline (`win-to-bluez --offline`) — offline taraf bugün
+      okunuyor ve yazılıyor, ama `→ host` yönünde toplanamıyor
 
 ## Bilinen boşluk
 

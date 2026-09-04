@@ -28,7 +28,13 @@ bir ayrıştırıcı daha eklerdi.
 KAPI BURADA YENİDEN YAZILMADI: `bondsync.write_gate` çağrılıyor. İki kopya
 tutulsaydı biri donar, ve donmuş olan yıkıcı tarafta durur.
 
-Kullanım:  sudo tools/btbond-tui.py [--domain AD]...
+YETENEK EŞİTLİĞİ: karar olan hiçbir şey CLI'a özel değil — offline taraf
+(`--offline DOMAIN=MOUNT`), iki fazlı akış (`s`) ve devir (`h`) burada da var.
+CLI'da kalanlar ölçüm kolları (`--key-order`, `--authreq`, `--le-flags`) ve
+makine çıktısı (`--json`); onları ekrana koymak kullanıcıya ölçülmemiş bir
+şeyi tek tuşla yaptırmak olurdu.
+
+Kullanım:  sudo tools/btbond-tui.py [--domain AD]... [--offline DOMAIN=MOUNT]...
 """
 
 import argparse
@@ -56,6 +62,12 @@ WRITER = {
     "to-guest": HERE / "bluez-to-win.py",
 }
 
+# İKİ FAZLI AKIŞ ve DEVİR burada YENİDEN YAZILMADI: TUI `btbond-sync.py`yi
+# çağırıyor, tıpkı onun yazıcıları çağırdığı gibi. Faz sırası, faz arası
+# yeniden ölçüm, ayrışan cihazın engellenmesi ve devrin `vfioctl` çağrısı tek
+# sahipte kalıyor — ikinci bir kopya, biri donduğunda yıkıcı tarafta durur.
+SYNC_CLI = HERE / "btbond-sync.py"
+
 VERDICT_LABEL = {
     bondsync.MATCH: "eşleşiyor",
     bondsync.HOST_ONLY: "yalnız host'ta",
@@ -71,8 +83,16 @@ HELP = """\
   r        tazele (taraf başına ~1 sn: misafir yarısı bir guest-exec turu)
   d        seçili satırın ayrıntısı (parmak izleri, teknoloji, adres tipi)
   Enter    satırın İMA ETTİĞİ yönde replike et — yön satırın özelliği
+  s        TOPLA + DAĞIT (iki fazlı akış, kapsamın tamamı)
+  h        radyoyu devret (seçili satırın domain'i)
   ?        bu yardım
   q        çık
+
+[b]Neden `s` iki faz[/b]
+  Çevre birim merkez adresi başına tek bond tutar, yani bir tarafta yapılan
+  eşleştirme diğer BÜTÜN tarafları bayatlatır. Host merkez olmak zorunda:
+  her taraftan host'a topla, sonra host'tan kapsama dağıt. Fazlar arasında
+  yeniden ölçülür — yoksa ikinci fazın girdisi bayat olur.
 
 [b]Hükümler[/b]
   eşleşiyor          iki taraf aynı anahtar materyalini taşıyor, iş yok
@@ -169,6 +189,29 @@ class Resolve(ModalScreen):
         self.dismiss(None if event.button.id == "cancel" else event.button.id)
 
 
+class HandoverTarget(ModalScreen):
+    """Radyo nereye gitsin? Bu bir NİYET sorusu, ölçüm değil."""
+
+    BINDINGS = [Binding("escape", "dismiss(None)", "vazgeç")]
+
+    def __init__(self, domain):
+        super().__init__()
+        self._domain = domain
+
+    def compose(self) -> ComposeResult:
+        yield Vertical(
+            Static(f"[b]Radyoyu devret — {self._domain}[/b]", classes="mtitle"),
+            Static("Radyonun NEREDE olduğu ölçülüyor; NEREYE gideceği "
+                   "ölçülemez, o yüzden sorulur.", classes="mbody"),
+            Horizontal(Button("host'a", variant="warning", id="host"),
+                       Button("misafire", variant="warning", id="guest"),
+                       Button("Vazgeç", id="cancel")),
+            id="confirmbox")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        self.dismiss(None if event.button.id == "cancel" else event.button.id)
+
+
 class BtbondTui(App):
     """Tek ekran: başlıkta radyonun yeri + ölçüm saati, gövdede satırlar."""
 
@@ -193,12 +236,16 @@ class BtbondTui(App):
         Binding("r", "refresh_survey", "tazele"),
         Binding("d", "detail", "ayrıntı"),
         Binding("enter", "replicate", "replike et"),
+        Binding("s", "sync_all", "topla+dağıt"),
+        Binding("h", "handover", "radyoyu devret"),
         Binding("question_mark", "help", "yardım"),
     ]
 
-    def __init__(self, domains, root, usb_id):
+    def __init__(self, domains, root, usb_id, offline=None):
         super().__init__()
         self.domains, self.root, self.usb_id = domains, root, usb_id
+        # `{domain: mount}` — bu domain'ler ajan yerine KOVANDAN okunuyor.
+        self.offline = offline or {}
         self.survey = None
         self.measured_at = None
         self.stale = False          # yazımdan sonra tablo bayat sayılır
@@ -228,7 +275,8 @@ class BtbondTui(App):
     def _measure(self) -> None:
         started = time.time()
         try:
-            survey = bondsync.survey_all(self.domains, self.root, self.usb_id)
+            survey = bondsync.survey_all(self.domains, self.root, self.usb_id,
+                                         self.offline)
         except Exception as exc:                       # noqa: BLE001 - UI'ye taşınıyor
             self.call_from_thread(self._measure_failed, str(exc))
             return
@@ -253,9 +301,15 @@ class BtbondTui(App):
         bands = []
         for side in survey["sides"]:
             if "error" in side:
-                bands.append(f"[red]{side['domain']}: ATLANDI[/red]")
+                # ÜÇ DURUM: taraf var ama ölçülmedi ↔ gerçekten ulaşılamadı.
+                mark = "ÖLÇÜLMEDİ" if side.get("disk") else "ULAŞILAMADI"
+                colour = "yellow" if side.get("disk") else "red"
+                bands.append(f"[{colour}]{side['domain']}: {mark}[/{colour}]")
             else:
-                bands.append(f"{side['domain']}: radyo {side['radio']['where']}")
+                channel = "kovan" if side.get("channel", "").startswith("offline") \
+                    else "ajan"
+                bands.append(f"{side['domain']} ({channel}): "
+                             f"radyo {side['radio']['where']}")
         took = f"  ({elapsed:.2f} sn)" if elapsed is not None else ""
         self.query_one("#band", Static).update(
             f"ölçüm {self.measured_at}{took}  |  " + "  |  ".join(bands))
@@ -267,9 +321,17 @@ class BtbondTui(App):
         self.rows = []
         for side in survey["sides"]:
             if "error" in side:
+                # "Bond yok" ile "ölçmedim" AYNI GÖRÜNMEZ: disk bulunabiliyorsa
+                # taraf var ve `--offline <domain>=<mount>` ile okunabilir.
                 self.rows.append((side["domain"], None))
-                table.add_row(side["domain"], "—", "—", "ATLANDI", "",
-                              side["error"][:60])
+                disk = side.get("disk")
+                if disk:
+                    table.add_row(side["domain"], disk["path"], disk["kind"],
+                                  "ÖLÇÜLMEDİ (kapalı)", "",
+                                  f"--offline {side['domain']}=<mount> ile okunur")
+                else:
+                    table.add_row(side["domain"], "—", "—", "ULAŞILAMADI", "",
+                                  side["error"][:58])
                 continue
             for row in side["rows"]:
                 verdict = VERDICT_LABEL[row["verdict"]]
@@ -299,11 +361,65 @@ class BtbondTui(App):
     def action_help(self) -> None:
         self.push_screen(Help())
 
+    def action_sync_all(self) -> None:
+        """İki fazlı akışı KAPSAMIN TAMAMI için koştur — CLI'ı çağırarak."""
+        cmd = [str(SYNC_CLI), "sync", "--root", self.root,
+               "--usb-id", self.usb_id]
+        for domain in self.domains:
+            cmd += ["--domain", domain]
+        for domain, mount in self.offline.items():
+            cmd += ["--offline", f"{domain}={mount}"]
+        body = (f"kapsam: {', '.join(self.domains)}\n"
+                f"TOPLA (taraflardan host'a) → yeniden ölç → DAĞIT (host'tan "
+                f"taraflara)\n"
+                f"Taraflar arası anahtarı ayrışan cihaz hiçbir fazda otomatik "
+                f"yazılmaz.")
+        self.push_screen(Confirm("Topla + Dağıt", body, cmd),
+                         self._run_if_confirmed)
+
+    def action_handover(self) -> None:
+        """Radyoyu devret. HEDEF KULLANICININ NİYETİ, ölçüm değil.
+
+        Radyonun *nerede olduğu* ölçülüyor (başlıktaki bant), *nereye
+        gideceği* ölçülemez — o yüzden sorulur. Devir tek hedefe olur, o
+        yüzden seçili satırın domain'i kullanılıyor.
+        """
+        domain, _row = self._selected()
+        log = self.query_one("#log", RichLog)
+        if domain is None:
+            log.write("[dim]devir için bir satır seçin (domain'i o belirler).[/dim]")
+            return
+        self.push_screen(HandoverTarget(domain),
+                         lambda to: self._after_handover(domain, to))
+
+    def _after_handover(self, domain, to_side):
+        if not to_side:
+            return
+        cmd = [str(SYNC_CLI), "handover", "--to", to_side,
+               "--domain", domain, "--usb-id", self.usb_id,
+               "--root", self.root]
+        self.push_screen(
+            Confirm(f"Radyoyu devret → {to_side}",
+                    f"domain: {domain}\nradyo bu taraftan alınıp "
+                    f"`{to_side}` tarafına verilecek (vfioctl).", cmd),
+            self._run_if_confirmed)
+
     def action_detail(self) -> None:
         domain, row = self._selected()
         log = self.query_one("#log", RichLog)
         if row is None:
-            log.write("[dim]ayrıntı yok (bu satır bir taraf hatası).[/dim]")
+            side = next((x for x in self.survey["sides"]
+                         if x["domain"] == domain and "error" in x), None)
+            if side and side.get("disk"):
+                d = side["disk"]
+                log.write(f"[b]{domain}[/b] ÖLÇÜLMEDİ — taraf var, içeriği "
+                          f"okunmadı")
+                log.write(f"   disk: {d['path']}  ({d['kind']}, {d['how']})")
+                log.write(f"   okumak için: mount edip "
+                          f"`--offline {domain}=<mount>` ile açın")
+            elif side:
+                log.write(f"[b]{domain}[/b] ULAŞILAMADI — disk da bulunamadı")
+                log.write(f"   {side['error']}")
             return
         log.write(f"[b]{row['dev']}[/b] {row['name']}  ({row['tech']}, "
                   f"taraf {domain})")
@@ -397,16 +513,27 @@ def main():
                              f"(varsayılan: {bondsync.DEFAULT_DOMAIN})")
     parser.add_argument("--root", default=bluezbond.ROOT)
     parser.add_argument("--usb-id", default=bondsync.DEFAULT_USB_ID)
+    # CLI ile AYNI yüzey: karar olan bir yetenek CLI'a özel kalmamalı.
+    parser.add_argument("--offline", action="append", dest="offline_specs",
+                        metavar="DOMAIN=MOUNT", default=[],
+                        help="bu domain'i ajan yerine offline kovandan oku "
+                             "(misafir KAPALI olmalı); tekrarlanabilir")
     args = parser.parse_args()
+    offline, offline_error = bondsync.parse_offline_specs(args.offline_specs)
+    if offline_error:
+        parser.error(offline_error)
 
     domains = list(dict.fromkeys(args.domains)) if args.domains \
         else [bondsync.DEFAULT_DOMAIN]
+    for domain in offline:                 # offline verilen domain kapsama girer
+        if domain not in domains:
+            domains.append(domain)
     # Root ŞART: host yarısı `/var/lib/bluetooth` (0700) okuyor. Root değilken
     # `is_dir()` sessizce False döner, yani "bond yok" ile "okuyamadım" aynı
     # görünür — bu depoda ödenmiş bir tuzak.
     if os.geteuid() != 0:
         sys.exit("TUI root ister (/var/lib/bluetooth 0700) — `sudo` ile çalıştırın")
-    BtbondTui(domains, args.root, args.usb_id).run()
+    BtbondTui(domains, args.root, args.usb_id, offline).run()
 
 
 if __name__ == "__main__":

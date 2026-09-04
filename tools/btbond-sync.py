@@ -77,11 +77,27 @@ DIRECTION_ARROW = {"to-host": "→ host", "to-guest": "→ misafir", None: ""}
 CAPTURE_DEFAULT = "@varsayilan"
 
 
+def describe_unreached(side):
+    """Ulaşılamayan tarafı ÜÇ DURUMLU anlat.
+
+    *"Bond yok"* ile *"ölçmedim"* aynı görünmesin: disk bulunabiliyorsa taraf
+    **var** ve yalnız ölçülmedi — `--offline DOMAIN=MOUNT` ile okunabilir.
+    Bulunamıyorsa gerçekten ulaşılamaz.
+    """
+    disk = side.get("disk")
+    if disk:
+        return (f"ÖLÇÜLMEDİ (kapalı) — disk bulundu: {disk['path']} "
+                f"[{disk['how']}]; `--offline {side['domain']}=<mount>` ile okunur"
+                f"\n  sebep: {side['error']}")
+    return f"ULAŞILAMADI (disk da bulunamadı) — {side['error']}"
+
+
 def render(state):
     """Durumu insan için bas. Parmak izi basılır, anahtar baytı asla."""
     radio = state["radio"]
     lines = [
-        f"domain {state['domain']}  |  adaptör {state['adapter'] or '(kesişim yok)'}",
+        f"domain {state['domain']}  |  adaptör {state['adapter'] or '(kesişim yok)'}"
+        f"  |  kanal {state.get('channel', '?')}",
         # Misafir sütunu HANGİ domain'i konuştuğunu söylüyor: tek domain
         # varsayan bir okuyucu, radyo başka bir domain'deyken basılan
         # `misafir=hayır`ı "radyo hiçbir misafirde değil" diye okur.
@@ -362,7 +378,7 @@ PHASE_LABEL = {
 }
 
 
-def run_phases(args, survey, domains, directions):
+def run_phases(args, survey, domains, directions, offline=None):
     """Fazları sırayla koştur, ve faz aralarında YENİDEN ÖLÇ.
 
     YENİDEN ÖLÇÜM BU AKIŞIN TAMAMI. `survey_all` bütün tarafları yazımlardan
@@ -385,7 +401,7 @@ def run_phases(args, survey, domains, directions):
             print("\n[yeniden ölçüm] fazlar arası: önceki faz host'u "
                   "değiştirmiş olabilir, sonraki faz taze durumla koşuyor.")
             sys.stdout.flush()
-            survey = bondsync.survey_all(domains, args.root, args.usb_id)
+            survey = bondsync.survey_all(domains, args.root, args.usb_id, offline)
         blocked = {item["dev"] for item in survey["cross"]}
         print(f"\n=== {PHASE_LABEL[direction]} ===")
         if blocked:
@@ -393,7 +409,7 @@ def run_phases(args, survey, domains, directions):
                   f"otomatik yazılmayacak")
         for side in survey["sides"]:
             if "error" in side:
-                print(f"  domain {side['domain']}: ATLANDI — {side['error']}")
+                print(f"  domain {side['domain']}: {describe_unreached(side)}")
                 exit_code = exit_code or 1
                 continue
             print(f"  --- domain {side['domain']}")
@@ -413,6 +429,13 @@ def main():
                              f"(varsayılan: {bondsync.DEFAULT_DOMAIN})")
     parser.add_argument("--root", default=bluezbond.ROOT)
     parser.add_argument("--usb-id", default=bondsync.DEFAULT_USB_ID)
+    # OFFLINE TARAF: misafir KAPALI, kovan host'tan mount edilmiş. Biçim
+    # `DOMAIN=MOUNT`, çünkü N taraflı bir yüzeyde mount'un hangi tarafa ait
+    # olduğu söylenmek zorunda → `bondsync.parse_offline_specs`.
+    parser.add_argument("--offline", action="append", dest="offline_specs",
+                        metavar="DOMAIN=MOUNT", default=[],
+                        help="bu domain'i ajan yerine offline kovandan oku "
+                             "(misafir KAPALI olmalı); tekrarlanabilir")
     parser.add_argument("--direction", choices=("to-host", "to-guest"),
                         help="yalnız bu yöndeki satırları uygula (varsayılan: ikisi de)")
     parser.add_argument("--to", choices=("host", "guest"), dest="to_side",
@@ -438,6 +461,13 @@ def main():
                         help="durumu makine-okunur bas (arayüz katmanı için)")
     args = parser.parse_args()
     domains, scope_warning = resolve_domains(args.domains)
+    offline, offline_error = bondsync.parse_offline_specs(args.offline_specs)
+    if offline_error:
+        parser.error(offline_error)
+    # Offline verilen domain kapsama da girer: kullanıcı onu adlandırdı.
+    for domain in offline:
+        if domain not in domains:
+            domains.append(domain)
     if args.capture_hci == Path(CAPTURE_DEFAULT):
         args.capture_hci = state_path("remote-info.json")
     if args.capture_hci and not (args.handover or args.command == "handover"):
@@ -486,7 +516,7 @@ def main():
                         capture_to, args.settle, args.root, args.keep_hci_log)
 
     # Ulaşılamayan taraf ATLANIR, döngüyü öldürmez → `bondsync.survey_all`.
-    survey = bondsync.survey_all(domains, args.root, args.usb_id)
+    survey = bondsync.survey_all(domains, args.root, args.usb_id, offline)
 
     if args.command == "status":
         if args.json:
@@ -498,7 +528,7 @@ def main():
             return 0
         for side in survey["sides"]:
             if "error" in side:
-                print(f"domain {side['domain']}  |  ATLANDI: {side['error']}\n")
+                print(f"domain {side['domain']}  |  {describe_unreached(side)}\n")
                 continue
             print(render(side))
             print()
@@ -520,7 +550,7 @@ def main():
             print()
             print_mismatch_advice(side)
 
-    exit_code = run_phases(args, survey, domains, directions)
+    exit_code = run_phases(args, survey, domains, directions, offline)
     if survey["cross"]:
         print(render_cross(survey["cross"]))
     if scope_warning:

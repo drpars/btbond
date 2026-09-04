@@ -23,11 +23,13 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+from xml.etree import ElementTree
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import bluezbond  # noqa: E402
 import winbond  # noqa: E402
 import agentexec  # noqa: E402
+import hivebond  # noqa: E402
 from agentexec import run_powershell  # noqa: E402
 
 # Bu makinenin radyosu; başka makinede değişir, o yüzden CLI'dan geçilebiliyor.
@@ -248,12 +250,99 @@ def _verdict(host_row, guest_row):
     return (KEY_MISMATCH, differing) if differing else (MATCH, [])
 
 
-def survey(domain=DEFAULT_DOMAIN, root=bluezbond.ROOT, usb_id=DEFAULT_USB_ID):
-    """İki tarafı oku, satır satır karşılaştır. Yön SEÇMEZ, hüküm verir."""
-    exitcode, stdout, stderr = run_powershell(domain, winbond.DUMP_POWERSHELL)
-    if exitcode != 0:
-        raise RuntimeError(f"misafir okuma komutu exitcode={exitcode}\n{stderr}")
-    adapters, names, devices, _svc = winbond.collect(winbond.parse_dump(stdout))
+def parse_offline_specs(values):
+    """`DOMAIN=MOUNT` listesini sözlüğe çevir. Döner: `(eşleme, hata|None)`.
+
+    İKİ ÖN YÜZ İÇİN ORTAK: `btbond-sync.py` de TUI de aynı biçimi alıyor, ve
+    ayrıştırma burada duruyor ki ikinci bir kopya doğmasın. `bluez-to-win.py`
+    çıplak bir mount alıyor çünkü tek hedefli — N taraflı bir yüzeyde mount'un
+    HANGİ tarafa ait olduğu söylenmek zorunda.
+    """
+    mapping = {}
+    for value in values or []:
+        domain, _, mount = value.partition("=")
+        if not domain or not mount:
+            return {}, (f"--offline biçimi `DOMAIN=MOUNT` olmalı, alınan: "
+                        f"{value!r}")
+        mapping[domain] = mount
+    return mapping, None
+
+
+def side_disk(domain, uri="qemu:///system"):
+    """Kapalı bir domain'in diskini host'ta bul. Döner: `dict | None`.
+
+    NİÇİN — bir taraf ulaşılamadığında *"bond yok"* ile *"ölçmedim"* aynı
+    görünmemeli. Disk bulunabiliyorsa taraf **var** ve içeriği okunabilir
+    (bağlandıktan sonra); bulunamıyorsa gerçekten ulaşılamaz. Bu fonksiyon
+    yalnız **okur**, hiçbir şey bağlamaz.
+
+    İki disk şekli de ölçüldü (2026-09-04, üç domain kapalıyken):
+      - imaj dosyası: XML'deki `<disk><source file=…>` doğrudan verir
+      - PCI passthrough: `/sys/bus/pci/devices/<adres>/nvme/*/nvme*n*`
+        (bu makinede `0000:02:00.0` → `/dev/nvme1n1`)
+
+    PCI kolu yalnız domain **kapalıyken** çözünür: koşarken cihaz
+    `vfio-pci`'de ve sysfs'te `nvme/` düğümü yok. KAPSAM: yalnız NVMe —
+    başka bir denetleyici sınıfı (AHCI, SCSI) sınanmadı.
+    """
+    try:
+        proc = subprocess.run(["virsh", "-c", uri, "dumpxml", "--inactive", domain],
+                              capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if proc.returncode != 0:
+        return None
+
+    try:
+        tree = ElementTree.fromstring(proc.stdout)
+    except ElementTree.ParseError:
+        return None
+
+    for disk in tree.findall(".//disk"):
+        if disk.get("device") != "disk":
+            continue
+        source = disk.find("source")
+        path = source.get("file") or source.get("dev") if source is not None else None
+        if path:
+            return {"kind": "image" if source.get("file") else "block",
+                    "path": path, "how": "domain XML"}
+
+    for hostdev in tree.findall('.//hostdev[@type="pci"]'):
+        address = hostdev.find("source/address")
+        if address is None:
+            continue
+        slot = "{}:{}.{}".format(address.get("bus", "0x00")[2:],
+                                 address.get("slot", "0x00")[2:],
+                                 address.get("function", "0x0")[2:])
+        base = Path(f"/sys/bus/pci/devices/0000:{slot}/nvme")
+        if not base.is_dir():
+            continue
+        for node in sorted(base.glob("nvme*/nvme*n*")):
+            if node.name.startswith("ng"):      # `ng1n1` genel karakter aygıtı
+                continue
+            return {"kind": "block", "path": f"/dev/{node.name}",
+                    "how": f"PCI {slot} → sysfs"}
+    return None
+
+
+def survey(domain=DEFAULT_DOMAIN, root=bluezbond.ROOT, usb_id=DEFAULT_USB_ID,
+           offline_mount=None):
+    """İki tarafı oku, satır satır karşılaştır. Yön SEÇMEZ, hüküm verir.
+
+    KANAL SEÇİMİ BURADA, tek yerde: `offline_mount` verilirse misafir yarısı
+    kovandan okunur (misafir **kapalı**), verilmezse ajandan (misafir
+    **koşuyor**). Modelin geri kalanı ikisinde de aynı — `winbond.collect`
+    çıktısı taşıyıcıdan bağımsız.
+    """
+    if offline_mount:
+        adapters, names, devices, _svc, meta = hivebond.read_bonds(offline_mount)
+        channel = f"offline: {meta['hive']}"
+    else:
+        exitcode, stdout, stderr = run_powershell(domain, winbond.DUMP_POWERSHELL)
+        if exitcode != 0:
+            raise RuntimeError(f"misafir okuma komutu exitcode={exitcode}\n{stderr}")
+        adapters, names, devices, _svc = winbond.collect(winbond.parse_dump(stdout))
+        channel = "ajan"
 
     host_adapters = bluezbond.list_adapters(root)
     # Hangi adaptör? Misafir ve host aynı radyoyu paylaştığı için normalde tek
@@ -261,6 +350,7 @@ def survey(domain=DEFAULT_DOMAIN, root=bluezbond.ROOT, usb_id=DEFAULT_USB_ID):
     common = [a for a in host_adapters if a in adapters]
     result = {
         "domain": domain,
+        "channel": channel,
         "radio": radio_where(domain, usb_id),
         "host_adapters": host_adapters,
         "guest_adapters": sorted(adapters),
@@ -296,7 +386,7 @@ def survey(domain=DEFAULT_DOMAIN, root=bluezbond.ROOT, usb_id=DEFAULT_USB_ID):
     return result
 
 
-def survey_all(domains, root=bluezbond.ROOT, usb_id=DEFAULT_USB_ID):
+def survey_all(domains, root=bluezbond.ROOT, usb_id=DEFAULT_USB_ID, offline=None):
     """Her domain için ayrı bir `survey`; ulaşılamayan taraf ATLANIR.
 
     Model **eşleştirmeli kalıyor** (host ↔ bir misafir) ve bu bilinçli: host
@@ -311,12 +401,18 @@ def survey_all(domains, root=bluezbond.ROOT, usb_id=DEFAULT_USB_ID):
     `sys.exit` çağırmaması — eskiden ilk kapalı misafir bütün döngüyü
     öldürüyordu.
     """
+    offline = offline or {}
     sides = []
     for domain in domains:
         try:
-            sides.append(survey(domain, root, usb_id))
-        except RuntimeError as exc:                 # AgentError dahil
-            sides.append({"domain": domain, "error": str(exc)})
+            sides.append(survey(domain, root, usb_id, offline.get(domain)))
+        except (RuntimeError, hivebond.HiveError) as exc:   # AgentError dahil
+            # ULAŞILAMAYAN TARAF ÜÇÜNCÜ BİR DURUM: diski bulunabiliyorsa taraf
+            # **var** ve yalnız ÖLÇÜLMEDİ. "Bond yok" ile "ölçmedim" aynı
+            # görünmesin diye disk burada aranıyor — salt-okuma, hiçbir şey
+            # bağlanmıyor.
+            sides.append({"domain": domain, "error": str(exc),
+                          "disk": side_disk(domain)})
     return {"sides": sides, "cross": cross_sides(sides)}
 
 

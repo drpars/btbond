@@ -52,8 +52,9 @@ def row(dev, verdict, direction, host=None, guest=None, differing=()):
             "address_type": None}
 
 
-def side(domain, rows, radio_host=True, radio_guest=False):
+def side(domain, rows, radio_host=True, radio_guest=False, channel="ajan"):
     return {"domain": domain, "adapter": ADAPTER, "warnings": [],
+            "channel": channel,
             "radio": {"host": radio_host, "guest": radio_guest,
                       "others": None, "where": "sentetik"},
             "rows": rows}
@@ -170,20 +171,33 @@ async def t_stale():
 
 # --- 5) ulaşılamayan taraf satır olarak duruyor ---------------------------
 async def t_error_side():
+    # ÜÇ DURUM: okunan taraf / diski bulunan (ölçülmedi) / hiç ulaşılamayan.
+    # "Bond yok" ile "ölçmedim" aynı satır olmamalı.
     bondsync.survey_all = lambda *a, **k: survey(
         [side("d1", [row("AA:BB:CC:DD:EE:01", bondsync.MATCH, None,
                          host={"LTK": "f"}, guest={"LTK": "f"})]),
-         {"domain": "d2", "error": "d2: domain is not running"}])
-    app = tui.BtbondTui(["d1", "d2"], "/tmp", "0000:0000")
+         {"domain": "d2", "error": "d2: domain is not running",
+          "disk": {"kind": "image", "path": "/imaj/d2.qcow2", "how": "domain XML"}},
+         {"domain": "d3", "error": "d3: domain is not running", "disk": None}])
+    app = tui.BtbondTui(["d1", "d2", "d3"], "/tmp", "0000:0000")
     pilot, driver = await boot(app)
     try:
         table = app.query_one("#rows")
-        check("atlanan taraf da satır", table.row_count, 2)
-        check("hükmü ATLANDI", table.get_row_at(1)[3], "ATLANDI")
-        # O satırda `Enter` hiçbir şey yapmamalı (row None).
+        check("üç taraf üç satır", table.row_count, 3)
+        check("diski bulunan taraf ÖLÇÜLMEDİ", table.get_row_at(1)[3],
+              "ÖLÇÜLMEDİ (kapalı)")
+        check("disk yolu satırda", table.get_row_at(1)[1], "/imaj/d2.qcow2")
+        check("diski bulunamayan ULAŞILAMADI", table.get_row_at(2)[3],
+              "ULAŞILAMADI")
+        # Bu satırlarda `Enter` hiçbir şey yapmamalı (row None).
+        table.move_cursor(row=1)
         app.action_replicate()
         await driver.pause()
-        check("atlanan satırda Enter sessiz", len(app.screen_stack), 1)
+        check("ölçülmemiş satırda Enter sessiz", len(app.screen_stack), 1)
+        # `d` ise diski ve nasıl okunacağını söylemeli.
+        app.action_detail()
+        await driver.pause()
+        check("ayrıntı çökmüyor", app.is_running, True)
     finally:
         await pilot.__aexit__(None, None, None)
 
@@ -196,8 +210,83 @@ print("\n=== TUI: ANAHTAR FARKLI otomatik çözülmüyor ===")
 run(t_mismatch())
 print("\n=== TUI: yazımdan sonra tablo bayat ===")
 run(t_stale())
-print("\n=== TUI: ulaşılamayan taraf ===")
+print("\n=== TUI: üç durumlu taraf satırı ===")
 run(t_error_side())
+
+
+async def t_offline_channel():
+    """Offline okunan taraf modelde `channel` taşıyor ve satırları normal."""
+    bondsync.survey_all = lambda *a, **k: survey([side(
+        "d1", [row("AA:BB:CC:DD:EE:01", bondsync.GUEST_ONLY, "to-host",
+                   guest={"LTK": "fp"})],
+        channel="offline: /mnt/win/Windows/System32/config/SYSTEM")])
+    app = tui.BtbondTui(["d1"], "/tmp", "0000:0000", {"d1": "/mnt/win"})
+    pilot, driver = await boot(app)
+    try:
+        table = app.query_one("#rows")
+        check("offline taraf normal satır veriyor", table.row_count, 1)
+        check("hüküm ve yön yerinde", (table.get_row_at(0)[3],
+                                       table.get_row_at(0)[4]),
+              ("yalnız misafirde", "→ host"))
+        check("offline eşlemesi uygulamada", app.offline, {"d1": "/mnt/win"})
+    finally:
+        await pilot.__aexit__(None, None, None)
+
+
+print("\n=== TUI: offline kanaldan okunan taraf ===")
+run(t_offline_channel())
+
+
+async def t_parity():
+    """YETENEK EŞİTLİĞİ: iki fazlı akış ve devir TUI'de de var, ve ikisi de
+    CLI'ı çağırıyor — faz sırası/devir mantığının ikinci kopyası YOK."""
+    bondsync.survey_all = lambda *a, **k: survey([side("d1", [
+        row("AA:BB:CC:DD:EE:01", bondsync.HOST_ONLY, "to-guest",
+            host={"LTK": "fp1"})])])
+    app = tui.BtbondTui(["d1", "d2"], "/tmp", "8087:0032", {"d2": "/mnt/x"})
+    pilot, driver = await boot(app)
+    try:
+        ran = []
+        app._run = lambda cmd: ran.append(cmd)
+
+        # `s` iki fazlı akışı ONAY EKRANINA koyar, hemen koşturmaz.
+        app.action_sync_all()
+        await driver.pause()
+        check("sync onay ekranı açıldı", isinstance(app.screen, tui.Confirm), True)
+        check("onaysız koşmadı", ran, [])
+        cmd = app.screen._command
+        check("CLI'ı çağırıyor (ikinci kopya yok)",
+              Path(cmd[0]).name, "btbond-sync.py")
+        check("faz komutu sync", cmd[1], "sync")
+        check("kapsam geçiyor", [c for c in cmd if c in ("d1", "d2")], ["d1", "d2"])
+        check("offline eşlemesi geçiyor", "d2=/mnt/x" in cmd, True)
+        app.screen.dismiss(None)
+        await driver.pause()
+        check("vazgeçince koşmadı", ran, [])
+
+        # `h` önce HEDEF sorar (niyet), sonra onay.
+        app.query_one("#rows").move_cursor(row=0)
+        app.action_handover()
+        await driver.pause()
+        check("devir hedefi soruluyor",
+              isinstance(app.screen, tui.HandoverTarget), True)
+        check("hedef sorulurken koşmadı", ran, [])
+        app.screen.dismiss("host")
+        await driver.pause()
+        check("hedef seçilince onay ekranı", isinstance(app.screen, tui.Confirm), True)
+        hcmd = app.screen._command
+        check("devir de CLI'dan", Path(hcmd[0]).name, "btbond-sync.py")
+        check("handover komutu", (hcmd[1], hcmd[2], hcmd[3]),
+              ("handover", "--to", "host"))
+        app.screen.dismiss(None)
+        await driver.pause()
+        check("devir de onaysız koşmadı", ran, [])
+    finally:
+        await pilot.__aexit__(None, None, None)
+
+
+print("\n=== TUI: yetenek eşitliği (s / h) ===")
+run(t_parity())
 
 print(f"\nSONUÇ: {OK} geçti / {FAIL} başarısız")
 sys.exit(1 if FAIL else 0)
