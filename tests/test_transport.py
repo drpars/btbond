@@ -216,21 +216,32 @@ guest_holds = {"host": False, "guest": True}
 check("misafir tutuyor, restart bayrağı misafiri GEÇİRMEZ (ölçülmedi)",
       bondsync.write_gate(guest_holds, "to-guest", stack_restart=True)[0], False)
 
-print("\n=== resolve_domains: kapsam ===")
-check("açık liste tekilleşiyor, sıra korunuyor",
-      btbond_sync.resolve_domains(["x", "y", "x"])[0], ["x", "y"])
-check("açık listede uyarı yok", btbond_sync.resolve_domains(["x"])[1], None)
-
-_real = bondsync.other_domains
+print("\n=== kapsam: argümansız = TANIMLI HERKES, --domain daraltır ===")
+# Eski davranış (tek varsayılan + "dokunulmayan N domain" uyarısı) kullanıcıyı
+# her koşuda üç --domain yazmaya mahkûm ediyordu; kaldırıldı (2026-09-04).
+import agentexec
+_real_discover = agentexec.discover_domains
 try:
-    bondsync.other_domains = lambda *a, **k: []
-    check("başka domain yok -> uyarı yok", btbond_sync.resolve_domains(None)[1], None)
-    bondsync.other_domains = lambda *a, **k: ["baska1", "baska2"]
-    warning = btbond_sync.resolve_domains(None)[1]
-    check("uyarı dokunulmayanları ADLANDIRIYOR",
-          warning is not None and "baska1" in warning and "baska2" in warning, True)
+    agentexec.discover_domains = lambda uri=None: ["a", "b", "c"]
+    check("argümansız -> herkes", btbond_sync.resolve_domains(None)[0], ["a", "b", "c"])
+    check("argümansız -> not YOK", btbond_sync.resolve_domains(None)[1], None)
+    doms, note = btbond_sync.resolve_domains(["b", "b"])
+    check("--domain daraltır ve tekilleştirir", doms, ["b"])
+    check("daraltma notu dokunulmayanı ADLANDIRIYOR",
+          note is not None and "a" in note and "c" in note, True)
+    # Tek hedefli araçlar: birden çok tanımlıyken TAHMİN YOK.
+    check("single_domain: verildiyse o", agentexec.single_domain("b")[0], "b")
+    dom, why = agentexec.single_domain(None, "x")
+    check("single_domain: 3 tanımlı -> hata, ad listesiyle",
+          dom is None and "a, b, c" in why, True)
+    agentexec.discover_domains = lambda uri=None: ["tek"]
+    check("single_domain: tek tanımlı -> o", agentexec.single_domain(None)[0], "tek")
+    agentexec.discover_domains = lambda uri=None: None
+    check("keşif olanaksız -> varsayılan + not",
+          (btbond_sync.resolve_domains(None)[0], btbond_sync.resolve_domains(None)[1] is not None),
+          ([agentexec.DEFAULT_DOMAIN], True))
 finally:
-    bondsync.other_domains = _real
+    agentexec.discover_domains = _real_discover
 
 print(f"\nSONUÇ: {OK} geçti / {FAIL} başarısız")
 sys.exit(1 if FAIL else 0)

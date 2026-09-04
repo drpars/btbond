@@ -34,7 +34,9 @@ CLI'da kalanlar ölçüm kolları (`--key-order`, `--authreq`, `--le-flags`) ve
 makine çıktısı (`--json`); onları ekrana koymak kullanıcıya ölçülmemiş bir
 şeyi tek tuşla yaptırmak olurdu.
 
-Kullanım:  sudo tools/btbond-tui.py [--domain AD]... [--offline DOMAIN=MOUNT]...
+Kullanım:  sudo tools/btbond-tui.py                        # tanımlı bütün domain'ler
+           sudo tools/btbond-tui.py --domain AD              # tek hedef
+           sudo tools/btbond-tui.py --offline DOMAIN=MOUNT   # elle bağlanmış taraf
 """
 
 import argparse
@@ -46,6 +48,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+import agentexec  # noqa: E402
 import bluezbond  # noqa: E402
 import bondsync  # noqa: E402
 import sidemount  # noqa: E402
@@ -581,8 +584,8 @@ class BtbondTui(App):
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--domain", action="append", dest="domains", metavar="AD",
-                        help="işlenecek domain; tekrarlanabilir "
-                             f"(varsayılan: {bondsync.DEFAULT_DOMAIN})")
+                        help="kapsamı bu domain(ler)e daralt; verilmezse "
+                             "tanımlı bütün domain'ler (CLI ile aynı)")
     parser.add_argument("--root", default=bluezbond.ROOT)
     parser.add_argument("--usb-id", default=bondsync.DEFAULT_USB_ID)
     # CLI ile AYNI yüzey: karar olan bir yetenek CLI'a özel kalmamalı.
@@ -599,11 +602,14 @@ def main():
     if offline_error:
         parser.error(offline_error)
 
-    domains = list(dict.fromkeys(args.domains)) if args.domains \
-        else [bondsync.DEFAULT_DOMAIN]
+    # KAPSAM VARSAYILANDA HERKES — `agentexec.resolve_scope`, CLI ile aynı
+    # yer. Kullanıcı tek hedef istediğinde `--domain` verir.
+    domains, scope_note = agentexec.resolve_scope(args.domains)
     for domain in offline:                 # offline verilen domain kapsama girer
         if domain not in domains:
             domains.append(domain)
+    if scope_note:
+        print(scope_note)
     # Root ŞART: host yarısı `/var/lib/bluetooth` (0700) okuyor. Root değilken
     # `is_dir()` sessizce False döner, yani "bond yok" ile "okuyamadım" aynı
     # görünür — bu depoda ödenmiş bir tuzak.

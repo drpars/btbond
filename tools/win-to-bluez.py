@@ -97,7 +97,10 @@ def verify(adapters, names, root, only):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--domain", default=agentexec.DEFAULT_DOMAIN)
+    # Verilmezse TEK tanımlı domain; birden çoksa tahmin edilmez (yazıcı
+    # yıkıcıdır) → `agentexec.single_domain`.
+    parser.add_argument("--domain", default=None,
+                        help="misafir domain'i (verilmezse tek tanımlı olan)")
     parser.add_argument("--root", default=bluezbond.ROOT,
                         help=f"BlueZ durum dizini (varsayılan {bluezbond.ROOT})")
     parser.add_argument("--key-order", choices=("asis", "reverse"), default="asis",
@@ -129,6 +132,10 @@ def main():
                              "(radyo host'tayken devirsiz yazım; host BT "
                              "bağlantıları birkaç saniye düşer)")
     args = parser.parse_args()
+    if not args.offline:
+        args.domain, why = agentexec.single_domain(args.domain, "win-to-bluez")
+        if why:
+            parser.error(why)
 
     if args.offline:
         adapters, names, devices, _svc, meta = hivebond.read_bonds(args.offline)

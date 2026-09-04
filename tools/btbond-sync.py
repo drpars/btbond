@@ -55,6 +55,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+import agentexec  # noqa: E402
 import bluezbond  # noqa: E402
 import bondsync  # noqa: E402
 import hcicapture  # noqa: E402
@@ -151,24 +152,13 @@ def render_cross(cross):
 
 
 def resolve_domains(explicit):
-    """İşlenecek domain'ler + (varsa) kapsam uyarısı.
+    """→ `agentexec.resolve_scope`: argümansız koşuda TANIMLI HERKES.
 
-    UYARI, DURDURMA DEĞİL — ve bu, yol haritasında yazdığımdan bilerek bir
-    sapma. "Birden fazla domain varken durup listele" ergonomiyi bu makinede
-    hemen bozardı (üç domain tanımlı, ama gerçek misafir bir tane ve varsayılan
-    kodda *bilinçli* bir seçim). Kapatılması gereken tuzak "sessizce birini
-    seçmek"ti; onu kapatan şey durmak değil, **dokunulmayanı adlandırmak** —
-    ve atlamanın yönü zaten güvenli: eksik işlem bond bozmaz, fazlası bozar.
+    Eski davranış (tek varsayılan + *"dokunulmayan N domain var"* uyarısı)
+    kullanıcıyı her koşuda üç `--domain` yazmaya mahkûm ediyordu; kaldırıldı.
+    Sarmalayıcı yalnız iki ön yüzün aynı yeri çağırdığını görünür kılmak için.
     """
-    if explicit:
-        return list(dict.fromkeys(explicit)), None
-    others = bondsync.other_domains(bondsync.DEFAULT_DOMAIN)
-    if not others:
-        return [bondsync.DEFAULT_DOMAIN], None
-    return [bondsync.DEFAULT_DOMAIN], (
-        f"--domain verilmedi: yalnız `{bondsync.DEFAULT_DOMAIN}` işlendi. "
-        f"DOKUNULMAYAN {len(others)} domain tanımlı: {', '.join(others)}. "
-        f"Hepsini istiyorsanız her biri için --domain verin.")
+    return agentexec.resolve_scope(explicit)
 
 
 def state_path(name):
@@ -460,12 +450,12 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("command",
                         choices=("status", "collect", "distribute", "sync", "handover"))
-    # TEKRARLANABİLİR: kapsam kullanıcının seçimi, ve bu makinede üç Windows
-    # domain'i tanımlı. Verilmezse varsayılan işlenir ve dokunulmayanlar
-    # UYARI olarak adlandırılır → `resolve_domains`.
+    # TEKRARLANABİLİR ve DARALTICI: verilmezse libvirt'teki BÜTÜN domain'ler
+    # işlenir (kapalı olanlar otomatik bağlanıp okunur); `--domain` kapsamı
+    # daraltır ve dokunulmayanlar notta adlandırılır → `agentexec.resolve_scope`.
     parser.add_argument("--domain", action="append", dest="domains", metavar="AD",
-                        help="işlenecek domain; tekrarlanabilir "
-                             f"(varsayılan: {bondsync.DEFAULT_DOMAIN})")
+                        help="kapsamı bu domain(ler)e daralt; verilmezse "
+                             "tanımlı bütün domain'ler")
     parser.add_argument("--root", default=bluezbond.ROOT)
     parser.add_argument("--usb-id", default=bondsync.DEFAULT_USB_ID)
     # OFFLINE TARAF: misafir KAPALI, kovan host'tan mount edilmiş. Biçim
@@ -526,8 +516,9 @@ def main():
     # Radyo TEK: birden çok tarafa aynı turda devretmek anlamsız, ve hangisi
     # olduğu tahmin edilmez.
     if args.handover and len(domains) > 1:
-        parser.error(f"--handover tek domain ister, {len(domains)} verildi: "
-                     f"{', '.join(domains)}")
+        parser.error(f"--handover tek domain ister; "
+                     f"{'verilen' if args.domains else 'tanımlı'} {len(domains)}: "
+                     f"{', '.join(domains)} — `--domain` ile seçin")
 
     # Faz seçimi BURADA doğrulanıyor, tabloları basmadan önce: `parser.error`
     # stderr'e tamponsuz yazıyor, stdout ise tamponlu — sonraya bırakılırsa
@@ -549,11 +540,12 @@ def main():
         if not args.to_side:
             parser.error("`handover` için --to host|guest gerekir")
         # Devir TEK hedefe olur: radyo tek, ve nereye gideceği kullanıcının
-        # niyeti. Birden çok domain verilmişse hangisi olduğu belirsizdir ve
-        # tahmin edilmez.
+        # niyeti. Kapsam artık varsayılanda "herkes" olduğu için burada
+        # açıkça daraltılmış olması gerekir; tahmin edilmez.
         if len(domains) > 1:
-            parser.error(f"`handover` tek domain ister, {len(domains)} verildi: "
-                         f"{', '.join(domains)}")
+            parser.error(f"`handover` tek domain ister; "
+                         f"{'verilen' if args.domains else 'tanımlı'} "
+                         f"{len(domains)}: {', '.join(domains)} — `--domain` ile seçin")
         if os.geteuid() != 0 and args.capture_hci and not args.dry_run:
             sys.exit("--capture-hci root ister (btmon monitör soketi)")
         direction = "to-host" if args.to_side == "host" else "to-guest"

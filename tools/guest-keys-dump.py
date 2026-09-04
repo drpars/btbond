@@ -14,7 +14,7 @@ BD_ADDR'i olduğu için görünür; onlar anahtar materyali değildir.
 
 Bu bir ÖLÇÜM aracıdır, senkron aracı değil: hiçbir şey yazmaz.
 
-Kullanım:  ./guest-keys-dump.py [domain]        (varsayılan: win11-nvme)
+Kullanım:  ./guest-keys-dump.py [domain]        (verilmezse tek tanımlı olan)
 """
 
 import sys
@@ -62,7 +62,10 @@ Get-PnpDevice -ErrorAction SilentlyContinue |
 
 
 def main():
-    domain = sys.argv[1] if len(sys.argv) > 1 else agentexec.DEFAULT_DOMAIN
+    domain, why = agentexec.single_domain(sys.argv[1] if len(sys.argv) > 1 else None,
+                                          "guest-keys-dump")
+    if why:
+        sys.exit(why)
     exitcode, stdout, stderr = run_powershell(domain, POWERSHELL)
 
     for label, data in (("stdout", stdout), ("stderr", stderr)):

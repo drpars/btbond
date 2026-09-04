@@ -33,10 +33,75 @@ class AgentError(RuntimeError):
     çağıranın kararına karışmıyor.
     """
 
-# Bu makinenin misafiri. Varsayilanin TEK sahibi burasi: uc ayri dosyada
-# ayni dize yaziliydi ve makine degisince ikisi gozden kacardi -- bir
-# olgunun tek sahibi olur, ve "domain" tam olarak kanalin olgusu.
+# Bu makinenin misafiri — artık yalnız SON ÇARE: libvirt hiç okunamıyorsa.
+# Varsayılan kapsam keşiftir (`discover_domains`), çünkü tek fiziksel
+# radyo → tek BD_ADDR → her tarafta aynı anahtar materyali; yani "hangi
+# taraflar" sorusunun doğal cevabı "hepsi", ve kullanıcı daraltmak istediğinde
+# `--domain` verir (2026-09-04, kullanıcı isteği: argümansız koşuda bütün
+# domain'ler, tek hedefte `--domain`). Tek olgu tek sahip: burada.
 DEFAULT_DOMAIN = "win11-nvme"
+
+
+def discover_domains(uri=LIBVIRT_URI):
+    """libvirt'te TANIMLI bütün domain adları (koşan + kapalı); okunamazsa `None`.
+
+    Windows olup olmadığı burada sorulmuyor: her taraf kendi kanalından
+    okunurken cevabını kendisi verir (Windows kurulumu olmayan disk
+    `sidemount`ta reddedilir ve satır `ULAŞILAMADI` der — kapsamı yazılı bir
+    olumsuz). Filtrelemek, hiç okunmayan bir tarafı sessizce gizlerdi.
+    """
+    try:
+        proc = subprocess.run(["virsh", "-c", uri, "list", "--all", "--name"],
+                              capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if proc.returncode != 0:
+        return None
+    return sorted(name for name in proc.stdout.split() if name)
+
+
+def resolve_scope(explicit):
+    """İşlenecek domain'ler + (varsa) kapsam notu. İki ön yüz için ORTAK.
+
+    - `--domain` verildiyse: o liste (tekilleştirilmiş, sıra korunur) ve
+      daraltıldığını söyleyen bir not — daraltma kullanıcının seçimi ve
+      dokunulmayan taraf adıyla yazılır.
+    - verilmediyse: keşfedilen HERKES, not yok. Eskiden burada tek bir
+      varsayılan işlenip *"dokunulmayan N domain var"* diye uyarılıyordu;
+      bu, kullanıcıyı her koşuda üç `--domain` yazmaya mahkûm eden bir
+      sürtünmeydi ve kaldırıldı.
+    - keşif olanaksızsa (libvirt yok): `DEFAULT_DOMAIN` + bunu söyleyen not.
+    """
+    discovered = discover_domains()
+    if explicit:
+        chosen = list(dict.fromkeys(explicit))
+        left = [d for d in (discovered or []) if d not in chosen]
+        note = (f"kapsam daraltıldı: {', '.join(chosen)} "
+                f"(dokunulmayan: {', '.join(left)})") if left else None
+        return chosen, note
+    if discovered:
+        return discovered, None
+    return [DEFAULT_DOMAIN], (f"libvirt okunamadı; varsayılana düşüldü: "
+                              f"{DEFAULT_DOMAIN}")
+
+
+def single_domain(explicit, purpose="bu komut"):
+    """Tek hedefli araçlar için domain: verildiyse o, yoksa TEK tanımlı olan.
+
+    Birden çok domain tanımlıyken tahmin edilmez — hangisi olduğu belirsizdir
+    ve yazıcılar yıkıcıdır. Döner: `(domain, hata|None)`.
+    """
+    if explicit:
+        return explicit, None
+    discovered = discover_domains()
+    if discovered is None:
+        return DEFAULT_DOMAIN, None
+    if len(discovered) == 1:
+        return discovered[0], None
+    if not discovered:
+        return None, f"{purpose} bir domain ister ve libvirt'te hiç tanımlı yok"
+    return None, (f"{purpose} tek domain ister ama {len(discovered)} tanımlı: "
+                  f"{', '.join(discovered)} — `--domain` ile seçin")
 
 
 def agent_command(domain, payload, uri=LIBVIRT_URI):

@@ -227,19 +227,25 @@ tek koşu sonunda eksik kalıyordu.
 `ANAHTAR FARKLI` yasağının taraflar arası hâli. `ATLANDI` satırı sebebi söyler;
 komutu `status` basar, kararı kullanıcı verir.
 
-**Kapsam kullanıcının seçimi: `--domain` tekrarlanabilir.**
+**Kapsam varsayılanda HERKES; `--domain` daraltır.**
 
 ```
-sudo tools/btbond-sync.py status --domain win11-nvme --domain win11
+sudo tools/btbond-sync.py status                    # libvirt'teki bütün domain'ler
+sudo tools/btbond-sync.py status --domain win11     # yalnız biri
 ```
 
-Verilmezse varsayılan domain işlenir ve tanımlı **başka** domain'ler
-*dokunulmadı* diye adlandırılır (`KAPSAM:` satırı). Bunun sebebi ölçüm: tek
-radyo, tek `BD_ADDR`, ve çevre birim **merkez adresi başına tek bond** tutuyor
-— yani bir misafirde yapılan eşleştirme diğer **bütün** tarafları bayatlatır,
-ve "sessizce birini işlemek" temiz görünen bir eksik işlemdir. Atlamanın yönü
-güvenli (eksik işlem bond bozmaz, fazlası bozar), o yüzden araç durmaz, adını
-koyar.
+Argümansız koşu `virsh list --all`daki her domain'i taraf sayar — koşanı ajandan,
+kapalıyı kovandan (kendiliğinden bağlayıp) okur. Sebebi fizik: tek radyo, tek
+`BD_ADDR`, çevre birim **merkez adresi başına tek bond** tutuyor; yani "hangi
+taraflar" sorusunun doğal cevabı *hepsi*. `--domain` verilince kapsam daraltılır
+ve **dokunulmayan** taraflar `KAPSAM:` satırında adlandırılır — daraltma
+kullanıcının seçimi, ama sessiz değil. Windows olmayan bir domain zarar görmez:
+diski salt-okuma denenir, Windows kurulumu yoksa satır `ULAŞILAMADI (Windows
+kurulumu bulunamadı)` der.
+
+Tek hedefli araçlar (`handover`, `win-to-bluez.py`, `bluez-to-win.py`,
+`guest-keys-dump.py`) `--domain` verilmezse **tek** tanımlı domain'i alır;
+birden çok tanımlıysa tahmin etmez, adlarını listeleyip `--domain` ister.
 
 Ulaşılamayan taraf — kapalı misafir, ajanı yanıt vermeyen misafir — **atlanır**
 ve döngüyü öldürmez; `ATLANDI` satırı sebebi söyler. Devir (`handover`) ise tek
@@ -397,7 +403,8 @@ kolu (domain yerine disk yolu) hiç koşmadı.
 ## TUI
 
 ```
-sudo tools/btbond-tui.py [--domain AD]... [--offline DOMAIN=MOUNT]...
+sudo tools/btbond-tui.py                          # tanımlı bütün domain'ler
+sudo tools/btbond-tui.py --domain win11-nvme      # tek hedef
 ```
 
 **Bir yön sihirbazı değil, bir diff görünümü.** Açılışta "nereden nereye" diye

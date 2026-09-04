@@ -238,7 +238,10 @@ def plan_removals(adapter, guest, only):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--domain", default=agentexec.DEFAULT_DOMAIN)
+    # Verilmezse TEK tanımlı domain; birden çoksa tahmin edilmez (yazıcı
+    # yıkıcıdır) → `agentexec.single_domain`.
+    parser.add_argument("--domain", default=None,
+                        help="misafir domain'i (verilmezse tek tanımlı olan)")
     parser.add_argument("--root", default=bluezbond.ROOT,
                         help=f"BlueZ durum dizini (varsayılan {bluezbond.ROOT})")
     parser.add_argument("--adapter", help="host adaptör MAC'i (varsayılan: tek olanı)")
@@ -272,6 +275,10 @@ def main():
                         help="ajan yerine offline kovana yaz: verilen mount kökü "
                              "(ya da doğrudan SYSTEM kovanı). Misafir KAPALI olmalı.")
     args = parser.parse_args()
+    if not args.offline:
+        args.domain, why = agentexec.single_domain(args.domain, "bluez-to-win")
+        if why:
+            parser.error(why)
     if args.offline and args.key_order == "reverse":
         # Tek sebep: ters sıra kolu hiçbir yönde ölçülmedi, ve offline yolda
         # onu ilk kez denemek iki ölçülmemiş şeyi birden değiştirmek olur.
