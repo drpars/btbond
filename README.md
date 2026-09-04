@@ -320,10 +320,15 @@ DURDU: hızlı başlatma AÇIK (HiberbootEnabled=1) — kovana yazılan şey dö
 Kapı ölçülmüş bir olguya dayanıyor ve makineye göre değişiyor: bu makinedeki
 iki Windows kurulumundan biri `1`, öbürü `0`.
 
-**Ölçülmemiş yarı, açıkça:** yazımın kendisi doğrulandı (gidiş-dönüş, kardeş
-değerlerin korunması, silme sonrası artık kalmaması), ama **Windows'un kendi
-kayıt defteri motorunun bu baytları kabul ettiği** sınanmadı — bunun için
-offline yazılıp sonra açılan bir Windows gerekiyor.
+Kapı sık ateşler: bu makinedeki üç Windows kurulumundan **ikisi** hızlı
+başlatmayı açık taşıyordu.
+
+**Doğrulandı, uçtan uca:** üç bond offline kovana yazıldı (143 işlem, tek
+commit), misafir açıldı, ve `btbond-sync.py status` üçünü de `eşleşiyor`
+verdi — yani **Windows'un kendi kayıt defteri motoru** hivex'in yazdığı
+baytları aynen sunuyor. Kalan boşluk: yazımdan sonra radyo o misafire hiç
+verilmediği için **cihazların fiilen bağlandığı** görülmedi, ve **dual boot**
+kolu (domain yerine disk yolu) hiç koşmadı.
 
 ## Testler
 
@@ -385,8 +390,11 @@ MIT → [LICENSE](LICENSE).
       dual boot; iki taraflı doğrulandı (altı parmak izi ajanla birebir aynı),
       bölüm ve qcow2 kolları ayrı ayrı koştu
 - [x] Offline kovan **yazma** (`bluez-to-win.py --offline`) + hızlı başlatma
-      kapısı — gidiş-dönüş doğrulandı; Windows'un baytları kabul ettiği
-      **henüz sınanmadı** (offline yazılıp sonra açılan bir Windows gerekiyor)
+      kapısı — uçtan uca doğrulandı: offline yazılan üç bond, misafir
+      açıldıktan sonra Windows'un kendi kayıt defterinden `eşleşiyor` döndü
+- [ ] Offline yazımdan sonra radyoyu o misafire verip **cihazların bağlandığını**
+      görmek (bugün doğrulanan şey kayıt, cihazın çalışması değil)
+- [ ] Gerçek **dual boot** kolu: taraf kimliği domain adı değil disk yolu
 - [x] Çoklu taraf: `--domain` tekrarlanabilir, kapsam kullanıcının seçimi,
       ulaşılamayan taraf atlanıyor, taraflar arası ayrışma raporlanıyor
 - [x] Yazma emitörleri düzenden ayrıldı (ara temsil + renderer'lar), altın

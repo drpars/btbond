@@ -215,8 +215,14 @@ def hibernation_gate(hive, control_set, mount_root=None):
         return False, ("`HiberbootEnabled` okunamadı — hızlı başlatmanın kapalı "
                        "olduğu ÖLÇÜLEMEDİ, kapı varsayımla geçilmez")
     if hiberboot != 0:
+        # ÇARE MESAJIN İÇİNDE: taban oran yüksek — bu makinedeki üç Windows
+        # kurulumundan İKİSİ hızlı başlatmayı açık taşıyor (ölçüldü
+        # 2026-09-04). Çaresi yazılmayan bir kapı, kullanıcıyı duvara
+        # çarptırıp orada bırakır.
         return False, (f"hızlı başlatma AÇIK (HiberbootEnabled={hiberboot}) — "
-                       f"kovana yazılan şey dönüşte kaybolur")
+                       f"kovana yazılan şey dönüşte kaybolur. Çare misafirin "
+                       f"İÇİNDE: `powercfg /h off` (ya da HiberbootEnabled=0), "
+                       f"sonra TAM kapatma; ardından bu komut tekrar denenir")
 
     if mount_root is None:
         return True, ("HiberbootEnabled=0; `hiberfil.sys` denetimi ATLANDI "
