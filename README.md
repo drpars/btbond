@@ -272,7 +272,7 @@ sudo tools/win-to-bluez.py --verify
 tools/guest-keys-dump.py [domain]      # varsayılan: win11-nvme
 ```
 
-**Kapalı misafir / dual boot — offline kovan** (`hivebond.py`, salt-okuma).
+**Kapalı misafir / dual boot — offline kovan** (`hivebond.py`).
 Misafir **kapalı** olmalı; disk host'ta blok aygıtı olarak görünmeli.
 
 ```
@@ -294,6 +294,36 @@ Windows kurulumunu bulmanın ölçütü **"NTFS mi" DEĞİL** — sonda okunacak
 dosyanın kendisi (`Windows/System32/config/SYSTEM`). Bir kurtarma bölümü de
 NTFS'tir ve araç onu reddeder. `CurrentControlSet` offline kovanda **yoktur**;
 gerçek set `Select\Current`ten çözülür.
+
+**Aynı kanaldan yazma** (`bluez-to-win.py --offline`) — mount `rw` olmalı:
+
+```
+sudo mount -t ntfs3 /dev/<bölüm> /mnt/win
+sudo tools/bluez-to-win.py --offline /mnt/win --dry-run
+sudo tools/bluez-to-win.py --offline /mnt/win
+```
+
+Hedefin **mevcut durumu da bu kanaldan** okunur; yanlış kanaldan okumak
+`ATLANDI`/`ÜZERİNE YAZILIYOR` hükmünü sessizce tersine çevirirdi. Yazım **tek
+commit**: parti sınırı Windows'un komut satırı sınırı içindi ve burada yok,
+üstelik tek commit yarım kalmış bir kaydı imkânsız kılıyor.
+
+**Hızlı başlatma kapısı.** Hazırda bekletmeyle kapanmış Windows, kovana
+yazılanı dönüşte **sessizce kaybeder**. Araç bu yüzden yazmadan önce iki
+bağımsız sinyale bakar — kovandan `HiberbootEnabled`, mount kökünden
+`hiberfil.sys` — ve **ölçemediğinde de durur**:
+
+```
+DURDU: hızlı başlatma AÇIK (HiberbootEnabled=1) — kovana yazılan şey dönüşte kaybolur
+```
+
+Kapı ölçülmüş bir olguya dayanıyor ve makineye göre değişiyor: bu makinedeki
+iki Windows kurulumundan biri `1`, öbürü `0`.
+
+**Ölçülmemiş yarı, açıkça:** yazımın kendisi doğrulandı (gidiş-dönüş, kardeş
+değerlerin korunması, silme sonrası artık kalmaması), ama **Windows'un kendi
+kayıt defteri motorunun bu baytları kabul ettiği** sınanmadı — bunun için
+offline yazılıp sonra açılan bir Windows gerekiyor.
 
 ## Testler
 
@@ -354,7 +384,9 @@ MIT → [LICENSE](LICENSE).
 - [x] Offline kovan **okuma** arka ucu (`hivebond.py`) — kapalı misafir ve
       dual boot; iki taraflı doğrulandı (altı parmak izi ajanla birebir aynı),
       bölüm ve qcow2 kolları ayrı ayrı koştu
-- [ ] Offline kovan **yazma** — önce hızlı başlatma / `hiberfil` denetimi
+- [x] Offline kovan **yazma** (`bluez-to-win.py --offline`) + hızlı başlatma
+      kapısı — gidiş-dönüş doğrulandı; Windows'un baytları kabul ettiği
+      **henüz sınanmadı** (offline yazılıp sonra açılan bir Windows gerekiyor)
 - [x] Çoklu taraf: `--domain` tekrarlanabilir, kapsam kullanıcının seçimi,
       ulaşılamayan taraf atlanıyor, taraflar arası ayrışma raporlanıyor
 - [x] Yazma emitörleri düzenden ayrıldı (ara temsil + renderer'lar), altın

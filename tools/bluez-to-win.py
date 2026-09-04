@@ -3,8 +3,17 @@
 
 `win-to-bluez.py`'nin simetriği. Kaynak
 `/var/lib/bluetooth/<adaptör>/<cihaz>/info` (root gerekir), hedef
-`HKLM\\SYSTEM\\CurrentControlSet\\Services\\BTHPORT\\Parameters`, kanal
-`qemu-guest-agent` (→ `agentexec`).
+`BTHPORT\\Parameters`.
+
+**İKİ KANAL.** Varsayılan `qemu-guest-agent` (→ `agentexec`), misafir koşarken.
+`--offline <mount>` ise kovana doğrudan yazar (→ `hivebond`) ve misafirin
+**kapalı** olmasını ister — dual boot'un ve kapalı bir misafirin tek yolu,
+çünkü ajan Windows'un içinde koşan bir programdır. Hangi kanal seçilirse
+hedefin **mevcut durumu da o kanaldan** okunur; yanlış kanaldan okumak
+`ATLANDI`/`ÜZERİNE YAZILIYOR` hükmünü sessizce tersine çevirirdi.
+
+Yazılacak şey her iki kanalda **aynı ara temsilden** (`winbond.*_ops`) gelir;
+kanallar yalnız onu render eder. İki kopya düzen tutulsaydı biri donardı.
 
 Ölçülmüş kayıt defteri düzeni `winbond`, ölçülmüş BlueZ `info` biçimi
 `bluezbond` modülünde; bu betik yalnız yönü kurar.
@@ -32,6 +41,7 @@ Kullanım:
     sudo tools/bluez-to-win.py                      # misafire yaz
     sudo tools/bluez-to-win.py --only E8:07:BF:A0:55:B4 --force
     sudo tools/bluez-to-win.py --remove --only <mac> # bond'u misafirden sil
+    sudo tools/bluez-to-win.py --offline /mnt/win     # kapalı misafir / dual boot
 """
 
 import argparse
@@ -42,6 +52,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import bluezbond  # noqa: E402
 import winbond  # noqa: E402
 import agentexec  # noqa: E402
+import hivebond  # noqa: E402
 from agentexec import run_powershell  # noqa: E402
 
 
@@ -149,9 +160,9 @@ def plan(root, adapter, bonds, guest, only, order, authreq, force, container=Tru
                 uuids = bluezbond.services(info)
                 attrs = {"COD": bluezbond.general_int(info, "Class")}
                 sdp = bluezbond.service_records(root, adapter, dev)
-                chunks.append(winbond.bredr_script(
+                chunks.append(winbond.bredr_ops(
                     adapter, dev, winbond.key_hex(link_key, order).lower()))
-                chunks.append(winbond.device_record_script(
+                chunks.append(winbond.device_record_ops(
                     adapter, dev, name, False, attrs, uuids, sdp))
                 report.append(f"  BR/EDR {dev}  \"{name}\"  LinkKey fp={fp}"
                               f"{'  (ÜZERİNE YAZILIYOR)' if exists else ''}")
@@ -172,8 +183,8 @@ def plan(root, adapter, bonds, guest, only, order, authreq, force, container=Tru
                                    winbond.key_hex(irk, order).lower() if irk else None, order)
                 fields["LTK"] = winbond.key_hex(ltk, order).lower()
                 attrs = le_attrs(info, adapter, dev, fields["AddressType"], container)
-                chunks.append(winbond.le_script(adapter, dev, fields))
-                chunks.append(winbond.device_record_script(
+                chunks.append(winbond.le_ops(adapter, dev, fields))
+                chunks.append(winbond.device_record_ops(
                     adapter, dev, name, True, attrs, []))
                 extra = ", ".join(f"{k}={fields[k]}" for k in
                                   ("KeyLength", "EDIV", "ERand", "AddressType",
@@ -201,7 +212,7 @@ def plan_removals(adapter, guest, only):
         if only and dev not in only:
             continue
         is_le = dev in guest_entry["le"]
-        chunks.append(winbond.remove_script(adapter, dev, is_le))
+        chunks.append(winbond.remove_ops(adapter, dev, is_le))
         report.append(f"  SİL    {dev}  ({'LE' if is_le else 'BR/EDR'})")
     return chunks, report
 
@@ -227,7 +238,18 @@ def main():
                         help="yazma; misafirdeki bond'ları sil (--only ile daraltılır)")
     parser.add_argument("--dry-run", action="store_true",
                         help="hiçbir şey yazma, yalnız planı bas")
+    # OFFLINE TARAF: misafir KAPALI, kovan host'tan mount edilmiş. Dual boot'un
+    # ve kapalı bir misafirin tek yolu — ajan, Windows'un içinde koşan bir
+    # program olduğu için orada yok. Yazma sırası kapısı burada tanımı gereği
+    # sağlanıyor: kapalı Windows radyoyu tutamaz.
+    parser.add_argument("--offline", metavar="MOUNT",
+                        help="ajan yerine offline kovana yaz: verilen mount kökü "
+                             "(ya da doğrudan SYSTEM kovanı). Misafir KAPALI olmalı.")
     args = parser.parse_args()
+    if args.offline and args.key_order == "reverse":
+        # Tek sebep: ters sıra kolu hiçbir yönde ölçülmedi, ve offline yolda
+        # onu ilk kez denemek iki ölçülmemiş şeyi birden değiştirmek olur.
+        parser.error("--offline ile --key-order reverse birlikte ölçülmedi")
 
     adapters = bluezbond.list_adapters(args.root)
     if not adapters:
@@ -244,7 +266,15 @@ def main():
     bonds = bluezbond.list_bonds(args.root, adapter)
     only = {m.upper() for m in args.only}
 
-    guest, _guest_names, _guest_devices = guest_state(args.domain)
+    # Hedefin MEVCUT durumu da hedefin kanalından okunur: offline yolda ajan
+    # yok, ve `--force` kararı ("misafirde zaten var mı") bu okumaya bağlı.
+    # Yanlış kanaldan okumak `ATLANDI`/`ÜZERİNE YAZILIYOR` hükmünü sessizce
+    # tersine çevirirdi.
+    if args.offline:
+        guest, _guest_names, _guest_devices, hive_meta = hivebond.read_bonds(args.offline)
+        print(f"offline kovan {hive_meta['hive']}  ({hive_meta['control_set']})")
+    else:
+        guest, _guest_names, _guest_devices = guest_state(args.domain)
     print(f"adaptör {adapter}  (host bond: {len(bonds)})")
     if adapter not in guest:
         print("  misafirde bu adaptörün anahtarı YOK — ilk yazımda oluşturulacak.")
@@ -274,8 +304,25 @@ def main():
         print(f"\n[dry-run] {len(chunks)} bond işlemi planlandı, misafire hiçbir şey yazılmadı.")
         return
 
+    if args.offline:
+        # Tek commit: `chunks` düzleştirilip bir kerede uygulanıyor. Ajan
+        # yolundaki partileme Windows'un komut satırı sınırı için vardı;
+        # offline'da o sınır yok, ve tek commit yarım kalmış bir kaydı da
+        # imkânsız kılıyor.
+        flat = [op for chunk in chunks for op in chunk]
+        marks, meta = hivebond.apply_ops(args.offline, flat, dry_run=False)
+        for mark in marks:
+            print(f"  {mark}")
+        print(f"\n{len(marks)} bond işlemi offline kovana yazıldı "
+              f"({meta['ops']} işlem, tek commit).")
+        print(f"  kapı: {meta['gate']}")
+        if not args.remove:
+            print("Windows bunları BTHPORT sürücüsü başlarken okur — misafir "
+                  "açıldığında (ya da radyo o tarafa verildiğinde) okunacak.")
+        return
+
     done = []
-    for batch in batches(chunks):
+    for batch in batches([winbond.render_powershell(chunk) for chunk in chunks]):
         script = winbond.WRITE_PRELUDE + "\n" + "\n\n".join(batch) + "\n"
         exitcode, stdout, stderr = run_powershell(args.domain, script)
         if exitcode != 0:
@@ -291,8 +338,9 @@ def main():
 
 
 if __name__ == "__main__":
-    # Ajan hatasını mesaja çeviren yer → `win-to-bluez.py`deki aynı yorum.
+    # Taşıyıcı hatasını mesaja çeviren yer → `win-to-bluez.py`deki aynı yorum.
+    # İki kanal, iki hata tipi; ikisi de tek satıra iner.
     try:
         main()
-    except agentexec.AgentError as exc:
+    except (agentexec.AgentError, hivebond.HiveError) as exc:
         sys.exit(str(exc))

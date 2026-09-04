@@ -178,6 +178,207 @@ def read_bonds(target):
                                       "control_set": control_set}
 
 
+# --- YAZMA -----------------------------------------------------------------
+#
+# Girdi `winbond`in ara temsili (`*_ops`); bu dosya onu hivex çağrılarına
+# çevirir. Düzenin sahibi hâlâ `winbond` — burada hangi anahtarın yazılacağına
+# dair tek bir karar yok, yalnız taşıyıcı.
+
+REG_SZ, REG_BINARY, REG_DWORD, REG_QWORD = 1, 3, 4, 11
+
+
+def hibernation_gate(hive, control_set, mount_root=None):
+    """Hızlı başlatma / hazırda bekletme AÇIKSA yazmayı reddet.
+
+    ÖLÇÜLMÜŞ TUZAK: `hiberfil`den dönen Windows kovan değişikliğini **sessizce
+    kaybeder** — yazım başarılı görünür, dosya değişir, sonra geri alınır.
+    Radyo kapısıyla aynı sınıf, o yüzden aynı biçimde kapı: ölçemediğinde de
+    durur, varsayımla geçmez.
+
+    İki bağımsız sinyal, ikisi de aranır:
+      - `Control\\Session Manager\\Power\\HiberbootEnabled` (kovandan)
+      - `hiberfil.sys` (yalnız mount kökü verildiyse — kovan yolu doğrudan
+        verildiyse bu yarı ÖLÇÜLEMEZ ve öyle söylenir)
+
+    Döner: `(izin, sebep)`.
+    """
+    node = hive.node_get_child(hive.root(), control_set)
+    for name in ("Control", "Session Manager", "Power"):
+        node = hive.node_get_child(node, name) if node else None
+    hiberboot = None
+    if node:
+        for value in hive.node_values(node):
+            if hive.value_key(value).lower() == "hiberbootenabled":
+                _t, data = hive.value_value(value)
+                hiberboot = int.from_bytes(data[:4], "little")
+    if hiberboot is None:
+        return False, ("`HiberbootEnabled` okunamadı — hızlı başlatmanın kapalı "
+                       "olduğu ÖLÇÜLEMEDİ, kapı varsayımla geçilmez")
+    if hiberboot != 0:
+        return False, (f"hızlı başlatma AÇIK (HiberbootEnabled={hiberboot}) — "
+                       f"kovana yazılan şey dönüşte kaybolur")
+
+    if mount_root is None:
+        return True, ("HiberbootEnabled=0; `hiberfil.sys` denetimi ATLANDI "
+                      "(kovan yolu doğrudan verildi, mount kökü bilinmiyor)")
+    hiberfil = Path(mount_root) / "hiberfil.sys"
+    if hiberfil.exists():
+        return False, (f"{hiberfil} VAR — sistem hazırda bekletilmiş, kovan "
+                       f"dönüşte geri alınır")
+    return True, "HiberbootEnabled=0 ve hiberfil.sys yok"
+
+
+def _relative(path):
+    """Canlı kayıt defteri yolunu `Parameters` altındaki parçalara çevir.
+
+    IR yolları canlı biçimde (`HKLM:\\SYSTEM\\CurrentControlSet\\…`), çünkü
+    onları üreten `winbond` PowerShell tarafını da besliyor. Offline kovanda
+    `CurrentControlSet` **yoktur**; o yüzden burada önek kesilir ve gerisi
+    kovanın gerçek `Parameters` düğümüne göre gezilir. Önek beklenmeyense
+    **gürültüyle** düşer: sessizce yanlış yere yazmak bu tuzağın tam kendisi.
+    """
+    prefix = winbond.PARAMS + "\\"
+    if not path.startswith(prefix):
+        raise HiveError(f"IR yolunda beklenen `Parameters` öneki yok: {path}")
+    return path[len(prefix):].split("\\")
+
+
+def _walk(hive, params, parts, create):
+    node = params
+    for part in parts:
+        child = hive.node_get_child(node, part)
+        if child is None:
+            if not create:
+                return None
+            child = hive.node_add_child(node, part)
+        node = child
+    return node
+
+
+def _encode(kind, raw):
+    """IR değerini (tip, bayt) çiftine çevir.
+
+    DWord/QWord **işaretsiz** maskeleniyor: PowerShell tarafı `[UInt32]`/
+    `[UInt64]` cast'i yapıyor ve `winbond.as_uint` okuma tarafında aynı
+    dönüşümü tersine çeviriyor — üç yer aynı semantiği paylaşmak zorunda.
+
+    REG_SZ'nin NUL ile bitmesi **türetim**, ölçüm değil: PowerShell'in boş
+    dizeyi nasıl sakladığı ölçülmedi. Yazma turunun round-trip'i bunu
+    kapatır (yazıp ajanla geri okuyarak).
+    """
+    if kind == winbond.BIN:
+        return REG_BINARY, bytes.fromhex(raw)
+    if kind == winbond.DW:
+        return REG_DWORD, (int(raw) & 0xFFFFFFFF).to_bytes(4, "little")
+    if kind == winbond.QW:
+        return REG_QWORD, (int(raw) & 0xFFFFFFFFFFFFFFFF).to_bytes(8, "little")
+    if kind == winbond.STR:
+        return REG_SZ, raw.encode("utf-16-le") + b"\x00\x00"
+    if kind == winbond.ZEROS:
+        return REG_BINARY, bytes(int(raw))
+    raise HiveError(f"değer işlemi değil: {kind!r}")
+
+
+def render_hive(ops, hive, params):
+    """IR'yi açık bir kovana uygula. `commit` ÇAĞIRMAZ — onu çağıran yapar.
+
+    Döner: `ECHO` işaretleri (PowerShell tarafındaki `'OK …'` satırlarının
+    karşılığı), böylece iki taşıyıcı aynı ilerleme raporunu verir.
+    """
+    marks = []
+    for op in ops:
+        kind = op[0]
+        if kind == winbond.ECHO:
+            marks.append(op[1])
+        elif kind == winbond.KEY:
+            _walk(hive, params, _relative(op[1]), create=True)
+        elif kind in (winbond.BIN, winbond.DW, winbond.QW, winbond.STR,
+                      winbond.ZEROS):
+            path, name, raw = op[1], op[2], op[3]
+            node = _walk(hive, params, _relative(path), create=False)
+            if node is None:
+                # IR'de bu değerden önce bir `KEY` işlemi olmalıydı. Sessizce
+                # oluşturmak, sıralama hatasını gizler.
+                raise HiveError(f"değer yazılacak anahtar yok ({path}) — "
+                                f"IR'de `KEY` işlemi eksik")
+            vtype, data = _encode(kind, raw)
+            # `node_set_value` TEK değeri yazar, diğerlerine dokunmaz
+            # (`node_set_values` hepsini değiştirir — o yüzden kullanılmıyor).
+            hive.node_set_value(node, {"key": name, "t": vtype, "value": data})
+        elif kind == winbond.DEL_KEY:
+            node = _walk(hive, params, _relative(op[1]), create=False)
+            if node is not None:
+                hive.node_delete_child(node)
+        elif kind == winbond.DEL_VALUE:
+            node = _walk(hive, params, _relative(op[1]), create=False)
+            if node is None:
+                continue
+            # hivex'te TEK değer silme yok: kalanlar toplanıp `node_set_values`
+            # ile hepsi yeniden yazılıyor. Süzme sadık olmak zorunda, çünkü bu
+            # çağrı düğümün bütün değerlerini DEĞİŞTİRİR.
+            keep = []
+            for value in hive.node_values(node):
+                key = hive.value_key(value)
+                if key == op[2]:
+                    continue
+                vtype, data = hive.value_value(value)
+                keep.append({"key": key, "t": vtype, "value": data})
+            hive.node_set_values(node, keep)
+        else:
+            raise HiveError(f"hive renderer'ında tanınmayan işlem: {kind!r}")
+    return marks
+
+
+def apply_ops(target, ops, mount_root=None, dry_run=False, ignore_gate=False):
+    """IR'yi offline kovana yaz — kapıdan geçerse.
+
+    `dry_run` dosyayı **write=True ile bile açmaz**: yalnız kapıyı ölçer ve
+    işlem sayısını verir.
+
+    `ignore_gate` **yalnız doğrulama içindir ve CLI'da açılmadı.** Kapı,
+    *"yaz sonra boot et"* yolunu koruyor: hızlı başlatmayla kapanmış Windows
+    kovan değişikliğini dönüşte kaybeder. Yazımı boot etmeden **offline geri
+    okuyan** bir tur için o kayıp tanımı gereği olamaz, ve bu makinede
+    yazma yolunu sınayabilen tek denek (`win11-test`) `HiberbootEnabled=1`
+    taşıyor. Gerçek bir replikasyonda bu bayrak kullanılmaz: kullanılırsa
+    yazım başarılı görünür ve sessizce geri alınır.
+
+    Döner: `(işaretler, meta)`.
+    """
+    hive_path = find_system_hive(target)
+    if mount_root is None and Path(target).is_dir():
+        mount_root = target
+
+    # Kapı SALT-OKUMA bir tanıtıcıyla ölçülüyor: reddedilen bir tur dosyayı
+    # yazma kipinde hiç açmasın.
+    probe = open_hive(hive_path)
+    control_set = resolve_control_set(probe)
+    allowed, reason = hibernation_gate(probe, control_set, mount_root)
+    del probe
+    if not allowed:
+        if not ignore_gate:
+            raise HiveError(f"DURDU: {reason}")
+        reason = f"KAPI AŞILDI (ignore_gate): {reason}"
+
+    meta = {"hive": str(hive_path), "control_set": control_set,
+            "gate": reason, "ops": len(ops)}
+    if dry_run:
+        return [], meta
+
+    if Hivex is None:                                        # pragma: no cover
+        raise HiveError("`hivex` Python bağlaması yok")
+    hive = Hivex(str(hive_path), write=True)
+    node = hive.root()
+    for name in (control_set, "Services", "BTHPORT", "Parameters"):
+        node = hive.node_get_child(node, name)
+        if node is None:
+            raise HiveError(f"kovanda yok: {control_set}\\…\\Parameters "
+                            f"(`{name}` bulunamadı)")
+    marks = render_hive(ops, hive, node)
+    hive.commit(None)
+    return marks, meta
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("target", metavar="YOL",
