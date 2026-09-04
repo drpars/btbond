@@ -320,7 +320,12 @@ def cross_sides(sides):
             if row["guest"]:
                 per_side.setdefault(side["domain"], {})[row["dev"]] = row["guest"]
 
-    if len(per_side) < 3:      # host + en az iki misafir olmadan "arası" yok
+    # Ölçüt MİSAFİR sayısı, `per_side` uzunluğu değil: host'un hiç bond'u
+    # olmadığı bir kurulumda `per_side`da "host" anahtarı doğmaz ve
+    # `len < 3` sınaması iki misafirli gerçek bir ayrışmayı sessizce
+    # geçirirdi — tam da `collect` fazının otomatik yazmasını engellemesi
+    # gereken durum.
+    if sum(1 for side in per_side if side != "host") < 2:
         return []
 
     out = []

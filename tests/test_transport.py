@@ -137,6 +137,30 @@ rendered = btbond_sync.render_cross(cross)
 check("AZINLIK işareti basılıyor", "<- AZINLIK" in rendered, True)
 check("'OY DEĞİL' uyarısı metnin içinde", "OY DEĞİL" in rendered, True)
 
+print("\n=== cross_sides: host'un hiç bond'u YOKKEN de ayrışmayı görüyor mu ===")
+# Düzeltilen sessiz dal: ölçüt `per_side` uzunluğu olsaydı (host anahtarı
+# doğmadığı için 2 < 3) iki misafirli gerçek bir ayrışma sessizce geçerdi —
+# tam da `collect` fazının otomatik yazmasını engellemesi gereken durum.
+host_yok = bondsync.cross_sides([side("A", None, {"LTK": "k1"}),
+                                 side("B", None, {"LTK": "k2"})])
+check("host'suz ayrışma bulundu", len(host_yok), 1)
+check("gruplar yalnız misafirlerden", host_yok[0]["labels"]["LTK"]["groups"],
+      {"k1": ["A"], "k2": ["B"]})
+
+print("\n=== iki fazlı akış ===")
+check("sync iki fazı SIRAYLA taşıyor", btbond_sync.PHASES["sync"],
+      ["to-host", "to-guest"])
+check("collect tek faz", btbond_sync.PHASES["collect"], ["to-host"])
+check("distribute tek faz", btbond_sync.PHASES["distribute"], ["to-guest"])
+
+# Ayrışan cihaz HİÇBİR fazda otomatik yazılmaz. Bütün satırlar engelliyse
+# `run_phase` kapıya hiç bakmadan 0 döner (yazacak bir şey yok).
+tek_satir = side("A", None, {"LTK": "k1"})
+tek_satir["rows"][0]["direction"] = "to-host"
+tek_satir["rows"][0]["verdict"] = bondsync.GUEST_ONLY
+check("engellenen cihazla faz yazmaya kalkmıyor",
+      btbond_sync.run_phase(None, tek_satir, "to-host", {DEV_MAC}), 0)
+
 print("\n=== resolve_domains: kapsam ===")
 check("açık liste tekilleşiyor, sıra korunuyor",
       btbond_sync.resolve_domains(["x", "y", "x"])[0], ["x", "y"])

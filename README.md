@@ -170,10 +170,35 @@ kanaldan söyler (host'ta `hciN` düğümü; domain'in canlı XML'inde hostdev).
 ```
 sudo tools/btbond-sync.py status               # tablo
      tools/btbond-sync.py status --json        # {"sides": […], "cross": […]}
-sudo tools/btbond-sync.py sync --dry-run       # ne yapılacak
-sudo tools/btbond-sync.py sync --handover      # yaz, sonra radyoyu devret
+sudo tools/btbond-sync.py sync --dry-run       # topla + dağıt, ne yapılacak
+sudo tools/btbond-sync.py sync --handover      # yaz, sonra radyoyu devret (tek domain)
 sudo tools/btbond-sync.py sync --handover --capture-hci   # + HCI'dan uzak bilgi topla
 ```
+
+**Akış iki fazlı, ve sıra zorunlu: `collect` sonra `distribute`.**
+
+```
+sudo tools/btbond-sync.py collect                    # taraflardan host'a
+sudo tools/btbond-sync.py distribute --domain a --domain b   # host'tan taraflara
+sudo tools/btbond-sync.py sync                       # ikisi, sırayla
+```
+
+Sebebi fizik: çevre birim **merkez adresi başına tek bond** tutar ve bütün
+taraflar aynı `BD_ADDR`ı gösterir, yani bir tarafta yapılan eşleştirme diğer
+**bütün** tarafları bayatlatır. Host merkez olmak zorunda — aracı o koşturuyor,
+`/var/lib/bluetooth`u o tutuyor, her misafire libvirt üzerinden yalnız o
+ulaşıyor. Akış bu yüzden yıldız: her taraftan host'a topla, sonra host'tan
+kapsamın tamamına dağıt.
+
+**Fazlar arasında yeniden ölçülür.** Durum yazımlardan önce okunuyor, yani
+`collect` host'u değiştirdiği anda `distribute`ın girdisi bayatlar. Tek döngüde
+taraf taraf iki yönü birden yürüten biçim bu yüzden **yakınsamıyordu**: A'dan
+host'a çekilen cihaz, B'nin bayat "yalnız host'ta" kümesine hiç girmiyor ve B
+tek koşu sonunda eksik kalıyordu.
+
+**Taraflar arası anahtarı ayrışan cihaz hiçbir fazda otomatik yazılmaz** —
+`ANAHTAR FARKLI` yasağının taraflar arası hâli. `ATLANDI` satırı sebebi söyler;
+komutu `status` basar, kararı kullanıcı verir.
 
 **Kapsam kullanıcının seçimi: `--domain` tekrarlanabilir.**
 
@@ -399,7 +424,8 @@ MIT → [LICENSE](LICENSE).
       ulaşılamayan taraf atlanıyor, taraflar arası ayrışma raporlanıyor
 - [x] Yazma emitörleri düzenden ayrıldı (ara temsil + renderer'lar), altın
       çıktı denkliğiyle: refactor öncesi/sonrası metin **birebir aynı**
-- [ ] `collect` + `distribute` iki fazlı akış (host kanonik kopya)
+- [x] `collect` + `distribute` iki fazlı akış (host kanonik kopya), fazlar
+      arası yeniden ölçümle — tek döngülü biçim N≥2 tarafta yakınsamıyordu
 - [ ] Offline taraf `status`ta görünsün — domain'in diskini kendi bulup
       mount etmesi gerekiyor (bugün mount elle yapılıyor)
 

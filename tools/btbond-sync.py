@@ -22,12 +22,26 @@ adlandırılır — sessizce birini seçmek, üç Windows domain'i olan bir maki
 temiz görünen bir eksik işlemdir. Ulaşılamayan taraf (kapalı misafir) atlanır,
 döngüyü öldürmez.
 
+**AKIŞ İKİ FAZLI, ve sıra zorunlu: `topla` sonra `dağıt`.** Fizik bunu
+gerektiriyor — çevre birim merkez adresi başına tek bond tutar ve bütün
+taraflar aynı `BD_ADDR`ı gösterir, yani bir tarafta yapılan eşleştirme diğer
+**bütün** tarafları bayatlatır. Host merkez olmak zorunda (aracı o koşturuyor,
+`/var/lib/bluetooth`u o tutuyor, her misafire yalnız o ulaşıyor), o yüzden
+akış: her taraftan host'a **topla**, sonra host'tan kapsamın tamamına **dağıt**.
+
+Fazlar arasında **yeniden ölçülür**: durum yazımlardan önce okunuyor, yani
+`topla` host'u değiştirdiği anda `dağıt`ın girdisi bayatlar. Tek döngüde
+taraf taraf iki yönü birden yürüten eski biçim bu yüzden **yakınsamıyordu** —
+A'dan çekilen cihaz B'nin bayat "yalnız host'ta" kümesine hiç girmiyordu.
+
 Kullanım:
     sudo tools/btbond-sync.py status
     sudo tools/btbond-sync.py status --domain win11-nvme --domain win11
     tools/btbond-sync.py status --json          # {"sides": […], "cross": […]}
-    sudo tools/btbond-sync.py sync --dry-run
-    sudo tools/btbond-sync.py sync --direction to-host --handover
+    sudo tools/btbond-sync.py sync --dry-run          # topla + dağıt
+    sudo tools/btbond-sync.py collect                 # yalnız taraflardan host'a
+    sudo tools/btbond-sync.py distribute --domain a --domain b   # host'tan taraflara
+    sudo tools/btbond-sync.py sync --handover         # tek domain ister
     sudo tools/btbond-sync.py handover --to host --capture-hci   # tek domain
 """
 
@@ -262,88 +276,152 @@ def handover(direction, domain, usb_id, dry_run, capture_to=None, settle=25,
     return code
 
 
-def run_sync(args, state):
-    rows = bondsync.actionable(state["rows"], args.direction)
+def print_mismatch_advice(state):
+    """`ANAHTAR FARKLI` satırları için komut bas — karar kullanıcının."""
     blocked = [r for r in state["rows"] if r["verdict"] == bondsync.KEY_MISMATCH]
+    if not blocked:
+        return
+    print("Kendiliğinden çözülmeyen satırlar (hangi tarafın yeni olduğunu araç "
+          "bilemez; yanlış seçim çalışan bond'u yok eder):")
+    for row in blocked:
+        for direction, script in WRITER.items():
+            print(f"  {row['dev']}  {DIRECTION_ARROW[direction]:<10} "
+                  f"sudo {script.relative_to(HERE.parent)} --only {row['dev']} --force")
+    print()
 
-    if blocked:
-        print("Kendiliğinden çözülmeyen satırlar (hangi tarafın yeni olduğunu araç "
-              "bilemez; yanlış seçim çalışan bond'u yok eder):")
-        for row in blocked:
-            for direction, script in WRITER.items():
-                print(f"  {row['dev']}  {DIRECTION_ARROW[direction]:<10} "
-                      f"sudo {script.relative_to(HERE.parent)} --only {row['dev']} --force")
-        print()
+
+def run_phase(args, state, direction, blocked_devs=()):
+    """TEK yönde TEK taraf için yazımı koştur — iki fazlı akışın yapı taşı.
+
+    `blocked_devs`: taraflar arası anahtarı ayrışan cihazlar. Bunlar hiçbir
+    fazda otomatik yazılmaz, çünkü hangi tarafın yeni olduğu ölçülemiyor ve
+    yanlış seçim çalışan bir bond'u yok eder. `ANAHTAR FARKLI` satırındaki
+    yasağın taraflar arası hâli.
+    """
+    rows = [r for r in bondsync.actionable(state["rows"], direction)
+            if r["dev"] not in blocked_devs]
+    skipped = [r for r in bondsync.actionable(state["rows"], direction)
+               if r["dev"] in blocked_devs]
+    for row in skipped:
+        print(f"  ATLANDI {row['dev']}  taraflar arası anahtar AYRIŞIYOR — "
+              f"otomatik yazılmaz")
 
     if not rows:
-        print("Yapılacak bir şey yok: yönü belli satır kalmadı.")
+        print(f"  yapılacak bir şey yok ({DIRECTION_ARROW[direction]}).")
         return 0
 
-    directions = sorted({row["direction"] for row in rows})
+    side = FORBIDDEN_SIDE[direction]
+    here = state["radio"][side]
+    print(f"  {DIRECTION_ARROW[direction]}  ({len(rows)} cihaz)")
+
+    # KAPI: hedef taraf radyoyu tutuyorsa yazma etkisiz kalır.
+    #
+    # ÇOKLU DOMAIN'DE DE DOĞRU, ve bu tesadüf değil: kapının sorduğu şey
+    # "radyo nerede" değil, "**hedef** onu tutuyor mu". Misafir kanalı
+    # yalnız adı verilen domain'in XML'ini okuduğu için ölçü tam o soruyu
+    # cevaplıyor — radyo ÜÇÜNCÜ bir domain'de olsa `guest=False` doğrudur,
+    # çünkü hedef Windows'un `BTHPORT` sürücüsü koşmuyor ve yazım o taraf
+    # radyoyu aldığında okunacak. Buradaki `radio[side]`i "radyonun yeri"
+    # sanıp düzeltmeye kalkmayın; düzeltilmesi gereken yer `where`
+    # dizesinin KAPSAMI idi ve o ayrıca yazıldı (`bondsync.radio_where`).
+    if here:
+        print(f"  DURDU: hedef ({side}) radyoyu tutuyor. Bu sırada yazmak hata "
+              f"vermez, sessizce etkisiz kalır — önce radyo öbür tarafa alınır.")
+        return 1
+    if here is None:
+        print(f"  DURDU: hedefin ({side}) radyoyu tutup tutmadığı ÖLÇÜLEMEDİ; "
+              f"kapı varsayımla geçilmez.")
+        return 1
+
+    # `--root` yazıcıya MUTLAKA geçer: geçmezse test kopyasına karşı
+    # koşulan bir tur sessizce GERÇEK `/var/lib/bluetooth`a yazar —
+    # durum tablosu kopyayı, yazım aslını konuşur ve ikisi arasındaki
+    # fark hiçbir yerde görünmez.
+    # Domain `state`ten alınır, `args`tan DEĞİL: `--domain` tekrarlanabilir
+    # ve bu fonksiyon taraf başına bir kez koşuyor.
+    cmd = ["sudo", str(WRITER[direction]),
+           "--domain", state["domain"], "--root", args.root]
+    for row in rows:
+        cmd += ["--only", row["dev"]]
+    if args.force:
+        cmd.append("--force")
+    if args.dry_run:
+        cmd.append("--dry-run")
+    print(f"  {' '.join(cmd)}")
+    # Alt süreç terminale DOĞRUDAN yazıyor; kendi çıktımız tamponda
+    # beklerse rapor yazıcının çıktısından SONRA görünür ve sıra
+    # tersine döner (ölçüldü). Her alt süreçten önce boşaltılıyor.
+    sys.stdout.flush()
+    result = subprocess.run(cmd, timeout=600)
+    exit_code = result.returncode
+    if result.returncode == 0 and args.handover:
+        capture_to = (args.capture_hci if args.capture_hci
+                      and capture_target(direction) else None)
+        if args.capture_hci and not capture_target(direction):
+            print("  [hci] bu yönde yakalama atlandı: radyo host'tan ÇIKIYOR, "
+                  "cihazlar misafirin içinde bağlanır ve host hiçbir olay görmez.")
+        exit_code = exit_code or handover(direction, state["domain"], args.usb_id,
+                                          args.dry_run, capture_to, args.settle,
+                                          args.root, args.keep_hci_log)
+    return exit_code
+
+
+# Komut → faz sırası. `sync` iki fazı SIRAYLA koşturuyor; ayrı komutlar tek faz.
+PHASES = {
+    "collect": ["to-host"],
+    "distribute": ["to-guest"],
+    "sync": ["to-host", "to-guest"],
+}
+
+PHASE_LABEL = {
+    "to-host": "TOPLA  (taraflardan host'a — host kanonik kopya olur)",
+    "to-guest": "DAĞIT  (host'tan seçilen kapsama)",
+}
+
+
+def run_phases(args, survey, domains, directions):
+    """Fazları sırayla koştur, ve faz aralarında YENİDEN ÖLÇ.
+
+    YENİDEN ÖLÇÜM BU AKIŞIN TAMAMI. `survey_all` bütün tarafları yazımlardan
+    **önce** okuyor; `topla` fazı host'u değiştirdiği anda sonraki fazın
+    girdisi bayatlar. Tek koşuda yakınsama ancak fazlar arasında yeniden
+    ölçülürse mümkün: eskiden tek döngü taraf taraf iki yönü birden
+    yürütüyordu ve A'dan host'a çekilen bir cihaz B'nin (bayat) "yalnız
+    host'ta" kümesine hiç girmiyordu — yani B tek koşu sonunda eksik kalıyordu.
+
+    Faz **içinde** yeniden ölçüm gerekmiyor: `dağıt` yalnız misafirlere yazar
+    (host sabit), `topla`nın kendi içindeki çakışması ise taraflar arası
+    ayrışma olarak zaten engelleniyor (`blocked`).
+    """
     exit_code = 0
-    for direction in directions:
-        side = FORBIDDEN_SIDE[direction]
-        here = state["radio"][side]
-        picked = [r for r in rows if r["direction"] == direction]
-        print(f"=== {DIRECTION_ARROW[direction]}  ({len(picked)} cihaz) ===")
-
-        # KAPI: hedef taraf radyoyu tutuyorsa yazma etkisiz kalır.
-        #
-        # ÇOKLU DOMAIN'DE DE DOĞRU, ve bu tesadüf değil: kapının sorduğu şey
-        # "radyo nerede" değil, "**hedef** onu tutuyor mu". Misafir kanalı
-        # yalnız adı verilen domain'in XML'ini okuduğu için ölçü tam o soruyu
-        # cevaplıyor — radyo ÜÇÜNCÜ bir domain'de olsa `guest=False` doğrudur,
-        # çünkü hedef Windows'un `BTHPORT` sürücüsü koşmuyor ve yazım o taraf
-        # radyoyu aldığında okunacak. Buradaki `radio[side]`i "radyonun yeri"
-        # sanıp düzeltmeye kalkmayın; düzeltilmesi gereken yer `where`
-        # dizesinin KAPSAMI idi ve o ayrıca yazıldı (`bondsync.radio_where`).
-        if here:
-            print(f"  DURDU: hedef ({side}) radyoyu tutuyor. Bu sırada yazmak hata "
-                  f"vermez, sessizce etkisiz kalır — önce radyo öbür tarafa alınır.")
-            exit_code = 1
-            continue
-        if here is None:
-            print(f"  DURDU: hedefin ({side}) radyoyu tutup tutmadığı ÖLÇÜLEMEDİ; "
-                  f"kapı varsayımla geçilmez.")
-            exit_code = 1
-            continue
-
-        # `--root` yazıcıya MUTLAKA geçer: geçmezse test kopyasına karşı
-        # koşulan bir tur sessizce GERÇEK `/var/lib/bluetooth`a yazar —
-        # durum tablosu kopyayı, yazım aslını konuşur ve ikisi arasındaki
-        # fark hiçbir yerde görünmez.
-        # Domain `state`ten alınır, `args`tan DEĞİL: `--domain` artık
-        # tekrarlanabilir ve `run_sync` taraf başına bir kez koşuyor.
-        cmd = ["sudo", str(WRITER[direction]),
-               "--domain", state["domain"], "--root", args.root]
-        for row in picked:
-            cmd += ["--only", row["dev"]]
-        if args.force:
-            cmd.append("--force")
-        if args.dry_run:
-            cmd.append("--dry-run")
-        print(f"  {' '.join(cmd)}")
-        # Alt süreç terminale DOĞRUDAN yazıyor; kendi çıktımız tamponda
-        # beklerse rapor yazıcının çıktısından SONRA görünür ve sıra
-        # tersine döner (ölçüldü). Her alt süreçten önce boşaltılıyor.
-        sys.stdout.flush()
-        result = subprocess.run(cmd, timeout=600)
-        exit_code = exit_code or result.returncode
-        if result.returncode == 0 and args.handover:
-            capture_to = (args.capture_hci if args.capture_hci
-                          and capture_target(direction) else None)
-            if args.capture_hci and not capture_target(direction):
-                print("  [hci] bu yönde yakalama atlandı: radyo host'tan ÇIKIYOR, "
-                      "cihazlar misafirin içinde bağlanır ve host hiçbir olay görmez.")
-            exit_code = exit_code or handover(direction, state["domain"], args.usb_id,
-                                              args.dry_run, capture_to, args.settle,
-                                              args.root, args.keep_hci_log)
+    for index, direction in enumerate(directions):
+        if index:
+            # Cümle "host DEĞİŞTİ" demiyor: bu tur onu ölçmüyor (`--dry-run`da
+            # hiçbir şey yazılmaz ve satır yine basılır). Söylediği tek şey
+            # ölçümün tekrarlandığı.
+            print("\n[yeniden ölçüm] fazlar arası: önceki faz host'u "
+                  "değiştirmiş olabilir, sonraki faz taze durumla koşuyor.")
+            sys.stdout.flush()
+            survey = bondsync.survey_all(domains, args.root, args.usb_id)
+        blocked = {item["dev"] for item in survey["cross"]}
+        print(f"\n=== {PHASE_LABEL[direction]} ===")
+        if blocked:
+            print(f"  taraflar arası ayrışan {len(blocked)} cihaz bu fazda "
+                  f"otomatik yazılmayacak")
+        for side in survey["sides"]:
+            if "error" in side:
+                print(f"  domain {side['domain']}: ATLANDI — {side['error']}")
+                exit_code = exit_code or 1
+                continue
+            print(f"  --- domain {side['domain']}")
+            exit_code = run_phase(args, side, direction, blocked) or exit_code
     return exit_code
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("command", choices=("status", "sync", "handover"))
+    parser.add_argument("command",
+                        choices=("status", "collect", "distribute", "sync", "handover"))
     # TEKRARLANABİLİR: kapsam kullanıcının seçimi, ve bu makinede üç Windows
     # domain'i tanımlı. Verilmezse varsayılan işlenir ve dokunulmayanlar
     # UYARI olarak adlandırılır → `resolve_domains`.
@@ -383,6 +461,24 @@ def main():
         parser.error("--capture-hci yalnız devirle anlamlı (`handover` komutu ya da "
                      "`sync --handover`): olaylar radyo host'a gelirken, adaptör "
                      "kurulurken geçiyor")
+    # Radyo TEK: birden çok tarafa aynı turda devretmek anlamsız, ve hangisi
+    # olduğu tahmin edilmez.
+    if args.handover and len(domains) > 1:
+        parser.error(f"--handover tek domain ister, {len(domains)} verildi: "
+                     f"{', '.join(domains)}")
+
+    # Faz seçimi BURADA doğrulanıyor, tabloları basmadan önce: `parser.error`
+    # stderr'e tamponsuz yazıyor, stdout ise tamponlu — sonraya bırakılırsa
+    # hata mesajı kendisinden sonra basılacak tablonun ÖNÜNDE görünüyor
+    # (ölçüldü). Aynı sıra tuzağı bu dosyada bir kez daha yazılı.
+    directions = PHASES.get(args.command, [])
+    if args.direction and directions:
+        # `sync --direction to-host` == `collect`; süzme fazı daraltıyor.
+        narrowed = [d for d in directions if d == args.direction]
+        if not narrowed:
+            parser.error(f"`{args.command}` komutu {args.direction} fazını "
+                         f"içermiyor (fazları: {', '.join(directions)})")
+        directions = narrowed
 
     if args.command == "handover":
         # Devir tek basina: yazilacak bir sey OLMASA da radyoyu tasimak ve
@@ -432,17 +528,16 @@ def main():
     if args.json:
         parser.error("--json yalnız `status` ile anlamlı")
     if os.geteuid() != 0 and not args.dry_run:
-        sys.exit("`sync` root ister (/var/lib/bluetooth 0700) — `sudo` ile çalıştırın")
+        sys.exit(f"`{args.command}` root ister (/var/lib/bluetooth 0700) — "
+                 f"`sudo` ile çalıştırın")
 
-    exit_code = 0
     for side in survey["sides"]:
-        if "error" in side:
-            print(f"=== domain {side['domain']}: ATLANDI ===\n  {side['error']}\n")
-            exit_code = exit_code or 1
-            continue
-        print(render(side))
-        print()
-        exit_code = run_sync(args, side) or exit_code
+        if "error" not in side:
+            print(render(side))
+            print()
+            print_mismatch_advice(side)
+
+    exit_code = run_phases(args, survey, domains, directions)
     if survey["cross"]:
         print(render_cross(survey["cross"]))
     if scope_warning:
