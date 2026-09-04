@@ -86,7 +86,8 @@ def cases():
     # yazılır; LE'de `LMPFeatures` ÖLÇÜLMÜŞ biçimde atlanır (Windows LE
     # cihazlarda o alanı tutmuyor); bilinmeyen alan hiç yazılmaz.
     REMOTE = {"LMPFeatures": 0x877BBFD8FE0DFEAF, "LmpVersion": 8,
-              "LmpSubversion": 12850, "ManufacturerId": 148}
+              "LmpSubversion": 12850, "ManufacturerId": 148,
+              "HostSupportedFeaturesMap": 7}
     yield "05c record BR/EDR + öğrenilen", winbond.device_record_script(
         ADAPTER, DEV, "", False, {}, [], None, remote=REMOTE)
     yield "05d record LE + öğrenilen (LMPFeatures ATLANIR)", \

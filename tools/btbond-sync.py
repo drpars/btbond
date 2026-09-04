@@ -191,16 +191,27 @@ def provoke(devices, deadline):
     ÖLÇÜLDÜ (2026-09-04): devirden sonra yalnız beklemek YETMİYOR — 40 sn'lik
     pencerede hiçbir cihaz kendiliğinden bağlanmadı ve yakalama boş döndü.
     Uzak sürüm/özellik olayları bağlantı KURULURKEN geçtiği için, bağlantı yoksa
-    öğrenilecek bir şey de yok. Kapalı ya da menzil dışı cihazda deneme
-    zararsızca düşer.
+    öğrenilecek bir şey de yok.
+
+    KAPALI CİHAZ "ZARARSIZCA DÜŞMÜYOR" — bu cümle burada yazılıydı ve YANLIŞTI
+    (ölçüldü 2026-09-04, Xbox kolu kapalıyken): `bluetoothctl connect` asılıyor,
+    `subprocess.run` **`TimeoutExpired` FIRLATIYOR**, ve istisna yakalanmadığı
+    için bütün `remote-info` turu ölüyordu — traceback'le, yani toplanmış
+    olabilecek cihazlar da kaydedilmeden. Zaman aşımı artık bir SONUÇ:
+    kapalı cihaz atlanır, tur sürer.
     """
     for dev in devices:
         if time.time() >= deadline:
             print(f"  [hci] süre doldu, kalan cihazlar denenmedi")
             return
-        result = subprocess.run(["bluetoothctl", "connect", dev],
-                                capture_output=True, text=True, timeout=25)
-        state = "bağlandı" if result.returncode == 0 else "bağlanmadı"
+        try:
+            result = subprocess.run(["bluetoothctl", "connect", dev],
+                                    capture_output=True, text=True, timeout=25)
+            state = "bağlandı" if result.returncode == 0 else "bağlanmadı"
+        except subprocess.TimeoutExpired:
+            state = "yanıt yok (kapalı/menzil dışı olabilir)"
+        except OSError as exc:
+            state = f"denenemedi ({exc})"
         print(f"  [hci] {dev}: {state}")
         sys.stdout.flush()
 

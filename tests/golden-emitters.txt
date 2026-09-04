@@ -151,6 +151,7 @@ Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbc
 Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff' 'LmpSubversion' 12850
 Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff' 'ManufacturerId' 148
 Set-Qw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff' 'LMPFeatures' 9762607555951853231
+Set-Qw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff' 'HostSupportedFeaturesMap' 7
 Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff' 'LocalEvaldIoCap' 1
 Ensure-Key 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455'
 Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455' 'AuthenticationRequirements' 5

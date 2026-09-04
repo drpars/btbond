@@ -69,8 +69,24 @@ import subprocess
 import time
 from pathlib import Path
 
+# Hangi alanın BR/EDR'ye özel olduğu kayıt defteri DÜZENİNİN olgusu, o yüzden
+# sahibi `winbond`; burada yalnız cümle kurmak için okunuyor. `winbond` bu
+# modülü import etmiyor, yani döngü yok (ölçüldü: yalnız hashlib + uuid).
+import winbond                                                # noqa: E402
+
 # Olay başlığı: `> HCI Event: Read Remote Supported Features (0x0b) plen 11 …`
-EVENT_RE = re.compile(r"^[<>]\s+HCI Event:\s+([^(]+?)\s+\(0x[0-9a-f]+\)")
+# AD DEĞİL KOD eşleştiriliyor, ve sebebi ölçüldü (2026-09-04): btmon satırı
+# sabit genişlikte basıyor ve sondaki `#<n> [hciN] <süre>` uzayınca **olay
+# adını kırpıyor** — aynı olay bir koşuda `Read Remote Supported Features`,
+# başka bir koşuda `Read Remote Supported Featu..` olarak geliyor. Ada dayanan
+# eşleme o yüzden koşuya göre sessizce ıskalıyordu: alan toplanmıyor, hata yok,
+# rapor "eksik" diyor. Parantez içindeki kod kırpılmaz.
+EVENT_RE = re.compile(r"^[<>]\s+HCI Event:\s+([^(]*?)\s*\((0x[0-9a-f]+)\)")
+# Olay kodları — btmon'un adları değil, spesifikasyonun numaraları.
+FEATURES_CODE = "0x0b"        # Read Remote Supported Features Complete
+VERSION_CODE = "0x0c"         # Read Remote Version Information Complete
+EXT_FEATURES_CODE = "0x23"    # Read Remote Extended Features Complete
+LE_META_CODE = "0x3e"         # LE Meta Event (gerçek ad bir SONRAKİ satırda)
 # Girintili alan: `        Handle: 256 (BR-ACL) Address: E8:07:… (…)`
 FIELD_RE = re.compile(r"^\s{4,}([A-Za-z][A-Za-z ]*?):\s*(.*)$")
 ADDRESS_RE = re.compile(r"Address:\s*([0-9A-Fa-f:]{17})")
@@ -105,6 +121,12 @@ FEATURES_MARK_RE = re.compile(r"^\s{4,}Features\[")
 # Önek eşleşmesi üçünü de kapsar, yani doğru adı bilmek gerekmiyor.
 FEATURES_EVENT = re.compile(r"^Read Remote Supported Features")
 VERSION_EVENT = re.compile(r"^Read Remote Version")
+# `Read Remote Extended Features` AYRI bir olay ve SAYFALI. Ölçüldü 2026-09-04
+# (Soundcore, BR/EDR): sayfa 0 `af fe 0d fe d8 bf 7b 87` — page-0 maskesinin
+# aynısı, yani `LMPFeatures`; sayfa 1 `07 00 …` — SSP/LE HOST destekleri, ve
+# little-endian okunuşu (7) Windows'un aynı cihaz için yazdığı
+# `HostSupportedFeaturesMap`e **birebir eşit**; sayfa 2 tamamen sıfır.
+EXT_FEATURES_EVENT = re.compile(r"^Read Remote Extended Features")
 # Sürüm olayında btmon İKİ alanı TEK satırda basıyor, ve alan adı `LMP version`:
 #     LMP version: Bluetooth 5.1 (0x0a) - Subversion 531 (0x0213)
 # Ölçüldü 2026-09-04, üç cihaz / iki taşıyıcı; biçim üçünde de aynı. Eski kod
@@ -122,6 +144,11 @@ WINDOWS_FIELDS = {
     "LmpVersion": "lmp_version",
     "ManufacturerId": "manufacturer",
     "LmpSubversion": "lmp_subversion",
+    # BEŞİNCİ ALAN (2026-09-04): çalışan bir kurulumla diff alınınca çıktı —
+    # `win11-nvme`de var, aracın yazdığı kayıtta yoktu. Kaynağı ölçüldü:
+    # `Read Remote Extended Features` **sayfa 1**. BR/EDR'ye özel, `LMPFeatures`
+    # gibi (LE cihazların Windows kaydında bu alan da YOK).
+    "HostSupportedFeaturesMap": "host_features",
 }
 
 
@@ -157,11 +184,12 @@ def parse(text, by_handle=None):
     by_handle = dict(by_handle or {})
     out = {}
     event = None
+    code = None
     fields = {}
     handle = None
 
     def flush():
-        if not event or handle is None:
+        if not code or handle is None:
             return
         address = by_handle.get(handle)
         if not address:
@@ -170,17 +198,30 @@ def parse(text, by_handle=None):
         # boş bir satır üretirdi ve rapor "cihaz bulundu, alan yok" diye
         # okunurdu — oysa o cihaz hiç sorgulanmamış olabilir.
         found = {}
-        if FEATURES_EVENT.match(event) and "features" in fields:
+        if code == FEATURES_CODE and "features" in fields:
             # HCI baytları LSB'den gelir; Windows QWORD'ü little-endian
             # saklıyor (ÖLÇÜLDÜ, Soundcore: birebir eşleşti).
             found["lmp_features"] = int.from_bytes(fields["features"], "little")
-        elif LE_FEATURES_EVENT.match(event) and "features" in fields:
+        elif code == EXT_FEATURES_CODE and "features" in fields:
+            # SAYFA NUMARASI hangi maske olduğunu söyler (`Page: 1/2`). Sayfa
+            # numarasını okumadan bu olayı `lmp_features`a yazmak, host
+            # desteklerini cihaz özellikleri sanmak olurdu.
+            page = (fields.get("Page") or "").split("/")[0].strip()
+            value = int.from_bytes(fields["features"], "little")
+            if page == "0":
+                found["lmp_features"] = value      # sayfa 0 == LMPFeatures
+            elif page == "1":
+                found["host_features"] = value
+            # Sayfa 2+ toplanmıyor: bu cihazda tamamen sıfırdı ve Windows
+            # karşılığı **aranmadı** — uydurmaktansa boş bırakılıyor.
+        elif (code == LE_META_CODE and LE_FEATURES_EVENT.match(event or "")
+                and "features" in fields):
             # LE özellik maskesi AYRI anahtarda tutuluyor ve Windows alanlarına
             # EŞLENMİYOR: farenin `Devices\<mac>` kaydında `LMPFeatures` alanı
             # hiç YOK (ölçüldü), yani onu oraya yazmak uydurma olurdu. Kayda
             # geçiyor çünkü bedava ve LE tarafını anlamaya yarar.
             found["le_features"] = int.from_bytes(fields["features"], "little")
-        elif VERSION_EVENT.match(event):
+        elif code == VERSION_CODE:
             for key, name in (("lmp_version", "Version"),
                               ("manufacturer", "Manufacturer"),
                               ("lmp_subversion", "Subversion")):
@@ -200,20 +241,21 @@ def parse(text, by_handle=None):
         header = EVENT_RE.match(line)
         if header:
             flush()
-            event, fields, handle = header.group(1).strip(), {}, None
+            event, code = header.group(1).strip(), header.group(2).lower()
+            fields, handle = {}, None
             continue
-        # `LE Meta Event` başlığından hemen sonraki satır gerçek alt olay adı;
-        # başlıktaki ad her LE olayı için aynı olduğundan tek başına işe yaramaz.
-        if event and event.startswith("LE Meta"):
+        # `LE Meta Event` altındaki gerçek ad bir SONRAKİ satırda; kod (0x3e)
+        # her LE olayı için aynı olduğundan orada ad okumak zorunlu.
+        if code == LE_META_CODE:
             sub = LE_META_RE.match(line)
             if sub:
                 event = sub.group(1).strip()
                 continue
         if BLOCK_END_RE.match(line):
             flush()
-            event, fields, handle = None, {}, None
+            event, code, fields, handle = None, None, {}, None
             continue
-        if event is None:
+        if code is None:
             continue
 
         if FEATURES_MARK_RE.match(line):
@@ -332,11 +374,15 @@ def request_remote_info(cons, log=print):
     sent = 0
     for handle, address, kind in cons:
         lo, hi = handle & 0xFF, (handle >> 8) & 0xFF
-        # LE'de özellik komutu atlanıyor (yukarıdaki KAPSAM notu).
-        ocfs = ["0x1D"] if kind.upper() == "LE" else ["0x1B", "0x1D"]
-        for ocf in ocfs:
+        # LE'de özellik komutları atlanıyor (yukarıdaki KAPSAM notu); BR/EDR'de
+        # `0x1C` SAYFA 1 ile isteniyor — `HostSupportedFeaturesMap`in kaynağı o.
+        if kind.upper() == "LE":
+            requests = [("0x1D", [])]
+        else:
+            requests = [("0x1B", []), ("0x1C", ["0x01"]), ("0x1D", [])]
+        for ocf, extra in requests:
             proc = subprocess.run([tool, "cmd", "0x01", ocf,
-                                   f"0x{lo:02x}", f"0x{hi:02x}"],
+                                   f"0x{lo:02x}", f"0x{hi:02x}"] + extra,
                                   capture_output=True, text=True, timeout=30)
             if proc.returncode == 0:
                 sent += 1
@@ -427,10 +473,10 @@ def summary(parsed, kinds=None):
         if missing:
             note = ""
             kind = (kinds or {}).get(address, "").upper()
-            if missing == ["LMPFeatures"] and kind == "LE":
-                lines.append(f"{'':<21}LMPFeatures yok — LE bağlantı, ve bu alan "
-                             f"Windows'ta LE cihazlar için ZATEN YOK (ölçüldü); "
-                             f"eksiklik değil.")
+            if kind == "LE" and set(missing) <= set(winbond.BREDR_ONLY_QWORDS):
+                lines.append(f"{'':<21}{', '.join(missing)} yok — LE bağlantı, ve "
+                             f"bu alanlar Windows'ta LE cihazlar için ZATEN YOK "
+                             f"(ölçüldü); eksiklik değil.")
                 continue
             if "LmpVersion" in missing:
                 note = ("  — sürüm olayı gelmedi; bu çekirdek komutu "

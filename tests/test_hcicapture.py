@@ -98,6 +98,50 @@ check("to_windows_fields üçünü de veriyor",
       hcicapture.to_windows_fields(seeded[DEV_A]),
       {"LmpVersion": 10, "LmpSubversion": 531, "ManufacturerId": 13})
 
+print("hcicapture — SAYFALI genişletilmiş özellikler")
+
+# `Read Remote Extended Features` sayfalı, ve sayfa numarası okunmadan
+# toplanan bir maske YANLIŞ alana yazılır: sayfa 0 cihazın özellikleri,
+# sayfa 1 HOST destekleri. İkisi de aynı `Features[...]` satırıyla geliyor.
+EXT_PAGE0 = """\
+> HCI Event: Read Remote Extended Features (0x23) plen 13    #4 [hci0] 5.429247
+        Status: Success (0x00)
+        Handle: 256
+        Page: 0/2
+        Features[0/0][8]:
+        01 02 03 04 05 06 07 08                          ........
+"""
+EXT_PAGE1 = """\
+> HCI Event: Read Remote Extended Features (0x23) plen 13    #7 [hci0] 6.912243
+        Status: Success (0x00)
+        Handle: 256
+        Page: 1/2
+        Features[1/0][8]:
+        07 00 00 00 00 00 00 00                          ........
+"""
+EXT_PAGE2 = """\
+> HCI Event: Read Remote Extended Features (0x23) plen 13   #10 [hci0] 8.400241
+        Status: Success (0x00)
+        Handle: 256
+        Page: 2/2
+        Features[2/0][8]:
+        09 00 00 00 00 00 00 00                          ........
+"""
+
+ext = hcicapture.parse(EXT_PAGE0 + EXT_PAGE1 + EXT_PAGE2, by_handle={256: DEV_B})
+check("sayfa 0 -> lmp_features", ext[DEV_B].get("lmp_features"), 0x0807060504030201)
+check("sayfa 1 -> host_features (little-endian)", ext[DEV_B].get("host_features"), 7)
+check("sayfa 1 lmp_features'i EZMİYOR",
+      ext[DEV_B]["lmp_features"] != 7, True)
+check("sayfa 2 toplanmıyor (Windows karşılığı aranmadı)",
+      sorted(ext[DEV_B]), ["host_features", "lmp_features"])
+check("host_features Windows alanına eşleniyor",
+      hcicapture.to_windows_fields(ext[DEV_B]).get("HostSupportedFeaturesMap"), 7)
+# Sayfa 1 TEK BAŞINA gelirse cihaz maskesi yazılmamalı — host desteğini
+# `LMPFeatures` sanmak, cihaza ait olmayan bir yeteneği ona atfetmek olurdu.
+only1 = hcicapture.parse(EXT_PAGE1, by_handle={256: DEV_B})
+check("yalnız sayfa 1: lmp_features YAZILMIYOR", "lmp_features" in only1[DEV_B], False)
+
 print("hcicapture — özellik dalı (regresyon)")
 
 parsed = hcicapture.parse(FEATURES_LOG, by_handle={256: DEV_B})
@@ -106,6 +150,36 @@ check("lmp_features little-endian okunuyor",
 check("özellik dalı Windows alanına eşleniyor",
       hcicapture.to_windows_fields(parsed[DEV_B]),
       {"LMPFeatures": 0x0807060504030201})
+
+print("hcicapture — btmon olay adını KIRPIYOR")
+
+# ÖLÇÜLDÜ (2026-09-04): btmon satırı sabit genişlikte basıyor; sondaki
+# `#<n> [hciN] <süre>` uzayınca olay ADI kırpılıyor. Aynı olay bir koşuda tam,
+# başka bir koşuda `Read Remote Supported Featu..` geliyor — yani ada dayanan
+# eşleme KOŞUYA GÖRE ıskalıyor ve sessiz: alan toplanmaz, hata yok, rapor
+# "eksik" der. Eşleme bu yüzden parantezdeki KODA bağlı.
+TRUNCATED = """\
+> HCI Event: Read Remote Supported Featu.. (0x0b) plen 11  #20 [hci0] 30.882787
+        Status: Success (0x00)
+        Handle: 256
+        Features[0/0][8]:
+        01 02 03 04 05 06 07 08                          ........
+"""
+trunc = hcicapture.parse(TRUNCATED, by_handle={256: DEV_B})
+check("kırpılmış ad yine de toplanıyor",
+      trunc[DEV_B].get("lmp_features"), 0x0807060504030201)
+# Sürüm olayının kırpılmış hâli de aynı sınıfta.
+TRUNC_VER = VERSION_LOG.replace("Read Remote Version Complete",
+                                "Read Remote Version Compl..")
+check("kırpılmış sürüm adı da toplanıyor",
+      hcicapture.parse(TRUNC_VER, by_handle={2048: DEV_A})[DEV_A].get("lmp_version"), 10)
+# Kod bilinmeyen bir olay kayıt AÇMAMALI: yoksa her olay boş satır üretirdi.
+OTHER = """\
+> HCI Event: Number of Completed Packets (0x13) plen 5     #9 [hci0] 1.234567
+        Handle: 256
+        Count: 2
+"""
+check("ilgisiz olay kayıt açmıyor", hcicapture.parse(OTHER, by_handle={256: DEV_B}), {})
 
 print("hcicapture — tohum ile log'un ilişkisi")
 

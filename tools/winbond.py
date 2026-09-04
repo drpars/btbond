@@ -530,16 +530,28 @@ Windows BR/EDR profil devnode'larını ancak bunları bildiğinde kuruyor; eskid
 elle yazılıyorlardı. Kaynakları `hcicapture` topluyor ve
 `$XDG_STATE_HOME/btbond/remote-info.json`a biriktiriyor.
 
-TİPLER ÖLÇÜLDÜ (2026-09-04, `win11-nvme` kovanı, üç cihaz): `LMPFeatures`
-**QWord**, `LmpVersion`/`LmpSubversion`/`ManufacturerId` **DWord**.
+TİPLER ÖLÇÜLDÜ (2026-09-04, `win11-nvme` kovanı, üç cihaz): `LMPFeatures` ve
+`HostSupportedFeaturesMap` **QWord**, `LmpVersion`/`LmpSubversion`/
+`ManufacturerId` **DWord**.
+
+`HostSupportedFeaturesMap` BEŞİNCİ alan ve sonradan bulundu (2026-09-04):
+araç dördünü yazdı, devnode doğdu, ama A2DP sürücüsü bağlanmadı; çalışan bir
+kurulumla diff alınınca eksik olan buydu. Kaynağı ölçüldü — `Read Remote
+Extended Features` **sayfa 1** (`07 00 …` → 7, çalışan kurulumun değeriyle
+birebir).
 
 KAPSAM, ve ikisi ayrı: üç sürüm alanı LE cihazlarda da Windows'ta VAR, ama
-`LMPFeatures` LE'de YOK (fare ve Xbox kayıtlarında o alan hiç geçmiyor) — o
-yüzden LE'de yazılmıyor. Sürüm üçlüsünün LE profil kurulumunda GEREKLİ olup
-olmadığı ÖLÇÜLMEDİ; yazılıyor çünkü Windows'un kendi yazdığı biçim bu.
+`LMPFeatures` ve `HostSupportedFeaturesMap` LE'de YOK (fare ve Xbox
+kayıtlarında o alanlar hiç geçmiyor) — o yüzden LE'de yazılmıyorlar. Sürüm
+üçlüsünün LE profil kurulumunda GEREKLİ olup olmadığı ÖLÇÜLMEDİ; yazılıyor
+çünkü Windows'un kendi yazdığı biçim bu.
 
 Bilinmeyen alan YAZILMAZ: uydurulmuş bir sürüm numarası, eksik alandan kötü —
 Windows onu cihazın gerçek yeteneği sanır."""
+
+# BR/EDR'ye özel QWORD alanlar: Windows bunları LE cihaz kayıtlarında
+# tutmuyor (ölçüldü), o yüzden LE'de yazılmazlar.
+BREDR_ONLY_QWORDS = ("LMPFeatures", "HostSupportedFeaturesMap")
 
 
 def remote_ops(dev_path, is_le, remote):
@@ -549,8 +561,10 @@ def remote_ops(dev_path, is_le, remote):
     for field in ("LmpVersion", "LmpSubversion", "ManufacturerId"):
         if remote.get(field) is not None:
             ops.append((DW, dev_path, field, int(remote[field])))
-    if not is_le and remote.get("LMPFeatures") is not None:
-        ops.append((QW, dev_path, "LMPFeatures", int(remote["LMPFeatures"])))
+    if not is_le:
+        for field in BREDR_ONLY_QWORDS:
+            if remote.get(field) is not None:
+                ops.append((QW, dev_path, field, int(remote[field])))
     return ops
 
 

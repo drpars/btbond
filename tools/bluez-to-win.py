@@ -166,7 +166,7 @@ def describe_remote(remote, is_le):
     """
     wanted = ["LmpVersion", "LmpSubversion", "ManufacturerId"]
     if not is_le:
-        wanted.append("LMPFeatures")
+        wanted += list(winbond.BREDR_ONLY_QWORDS)
     have = [f for f in wanted if remote.get(f) is not None]
     if not have:
         return ("öğrenilen alanlar YOK — `btbond-sync remote-info` ile "
