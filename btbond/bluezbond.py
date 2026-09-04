@@ -220,7 +220,7 @@ def bond_info(name, order, link_key=None, key_type=4, le_bond=None,
     ikisi de **aynı** `<adaptör>/<cihaz>/info` dosyasına gittiği için LE
     yazımı BR/EDR'yi **siliyordu** — `[LinkKey]` `PRESERVED_SECTIONS`ta
     olmadığı için `merge_preserved` da kurtarmıyordu. Hata yok, rc=0, geriye
-    yalnız `SupportedTechnologies=LE;` kalıyordu. Ters yön (`bluez-to-win.py`)
+    yalnız `SupportedTechnologies=LE;` kalıyordu. Ters yön (`btbond to-guest`)
     hep doğruydu: orada iki **bağımsız `if`** var, tek dosya değil iki ayrı
     kayıt defteri yolu yazılıyor.
 
@@ -242,7 +242,7 @@ def bond_info(name, order, link_key=None, key_type=4, le_bond=None,
     makinede öyle bir cihaz yok, kullanıcıda da). Açık kalan biçim değil
     davranış: BlueZ'in dosyayı okuyup cihazın iki teknolojiyle de bağlanması.
     """
-    from winbond import as_uint, key_hex
+    from .winbond import as_uint, key_hex
 
     techs = []
     if link_key is not None:
@@ -303,7 +303,7 @@ def le_info(name, bond, order, authenticated, addr_type_code):
 # Windows ↔ BlueZ imza anahtarı eşlemesi. Yön TÜRETİM, ölçüm değil: "Inbound"
 # = gelen imzalı veriyi doğrulamak için tutulan **uzak** anahtar → BlueZ'in
 # `RemoteSignatureKey`'i; giden veriyi imzalayan **yerel** anahtar →
-# `LocalSignatureKey`. Ters yön (`bluez-to-win.py` `le_fields`) aynı eşlemeyi
+# `LocalSignatureKey`. Ters yön (`btbond to-guest` `le_fields`) aynı eşlemeyi
 # zaten kullanıyor; iki fonksiyon birbirinin tersi olmak zorunda.
 #
 # Grup ve alan adları önce bluez 5.87-2 ikilisinde ayrı dize olarak
@@ -327,7 +327,7 @@ _COUNTER_MAX = (1 << 32) - 1
 
 def _signature_sections(bond, order, authenticated):
     """`CSRK`/`CSRKInbound` varsa BlueZ imza anahtarı bölümlerini üret."""
-    from winbond import as_uint, key_hex
+    from .winbond import as_uint, key_hex
 
     # `Authenticated` bu iki bölümde BOOLEAN, `[LongTermKey]`de tam sayı —
     # ölçüldü (2026-09-04): yazdığımız `0` BlueZ tarafından okundu ve dosya
@@ -351,7 +351,7 @@ def _signature_sections(bond, order, authenticated):
 
 
 # BlueZ'in ilk bağlantıda kendisi eklediği, bizim üretmediğimiz alanlar.
-# Üzerine yazarken KORUNUR: ters yön (`bluez-to-win.py`) tam olarak bunlardan
+# Üzerine yazarken KORUNUR: ters yön (`btbond to-guest`) tam olarak bunlardan
 # Windows'un `COD`, `LEAppearance`, `VID/PID/Version` ve profil UUID'lerini
 # türetiyor. Korunmazsa bir `--force` turu ters yönü sessizce sakatlar
 # (ölçüldü 2026-09-03: alanlar gitti, hata yok, çıkış kodu 0).

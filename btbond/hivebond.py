@@ -26,17 +26,16 @@ kovanı kabul etmesi. Yazma yolu eklenirse önce şu ikisi ölçülür:
 kovan değişikliğini dönüşte **sessizce** kaybeder.
 
 Kullanım:
-    tools/hivebond.py /mnt/win                 # mount kökü → kovanı kendi bulur
-    tools/hivebond.py /mnt/win/Windows/System32/config/SYSTEM
-    tools/hivebond.py /mnt/win --dump          # ham `V…` satırları
+    btbond hive /mnt/win                 # mount kökü → kovanı kendi bulur
+    btbond hive /mnt/win/Windows/System32/config/SYSTEM
+    btbond hive /mnt/win --dump          # ham `V…` satırları
 """
 
 import argparse
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-import winbond  # noqa: E402
+from . import winbond
 
 try:
     from hivex import Hivex
@@ -400,7 +399,7 @@ def main():
 
     # `bondsync` MODEL katmanı; taşıyıcı ona bağımlı olmasın diye import
     # burada, modül başında değil.
-    import bondsync
+    from . import bondsync
 
     if args.dump:
         text, hive_path, control_set = dump(args.target)
@@ -426,12 +425,3 @@ def main():
             print(f"  {dev}  {row['tech']:<9} {row['name']}")
             print(f"  {'':18}  {prints}")
     return 0
-
-
-if __name__ == "__main__":
-    # Hatayı MESAJA çeviren yer burası; kütüphane `sys.exit` çağırmaz
-    # → `agentexec.AgentError` yanındaki aynı gerekçe.
-    try:
-        sys.exit(main())
-    except HiveError as exc:
-        sys.exit(str(exc))

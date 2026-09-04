@@ -34,9 +34,9 @@ CLI'da kalanlar ölçüm kolları (`--key-order`, `--authreq`, `--le-flags`) ve
 makine çıktısı (`--json`); onları ekrana koymak kullanıcıya ölçülmemiş bir
 şeyi tek tuşla yaptırmak olurdu.
 
-Kullanım:  sudo tools/btbond-tui.py                        # tanımlı bütün domain'ler
-           sudo tools/btbond-tui.py --domain AD              # tek hedef
-           sudo tools/btbond-tui.py --offline DOMAIN=MOUNT   # elle bağlanmış taraf
+Kullanım:  sudo btbond tui                        # tanımlı bütün domain'ler
+           sudo btbond tui --domain AD              # tek hedef
+           sudo btbond tui --offline DOMAIN=MOUNT   # elle bağlanmış taraf
 """
 
 import argparse
@@ -44,14 +44,12 @@ import os
 import subprocess
 import sys
 import time
-from pathlib import Path
 
-HERE = Path(__file__).resolve().parent
-sys.path.insert(0, str(HERE))
-import agentexec  # noqa: E402
-import bluezbond  # noqa: E402
-import bondsync  # noqa: E402
-import sidemount  # noqa: E402
+from . import agentexec
+from . import bluezbond
+from . import bondsync
+from . import sidemount
+from .runner import self_command
 
 from textual import work  # noqa: E402
 from textual.app import App, ComposeResult  # noqa: E402
@@ -62,16 +60,16 @@ from textual.screen import ModalScreen  # noqa: E402
 from textual.widgets import (Button, DataTable, Footer, Header,  # noqa: E402
                              RichLog, Static)
 
-WRITER = {
-    "to-host": HERE / "win-to-bluez.py",
-    "to-guest": HERE / "bluez-to-win.py",
-}
+# Yazıcılar ve iki fazlı akış AYNI ARACIN alt komutları; çağrı yolu tek yerde
+# çözülüyor (→ `runner.self_command`), betik yolu elde tutulmuyor. Kurulu
+# paketle `btbond to-host …`, depodan koşulurken `python -m btbond to-host …`
+# koşar — ve onay ekranında görünen metin ikisinde de fiilen koşan komuttur.
+WRITER = {"to-host": "to-host", "to-guest": "to-guest"}
 
-# İKİ FAZLI AKIŞ ve DEVİR burada YENİDEN YAZILMADI: TUI `btbond-sync.py`yi
+# İKİ FAZLI AKIŞ ve DEVİR burada YENİDEN YAZILMADI: TUI `sync` alt komutunu
 # çağırıyor, tıpkı onun yazıcıları çağırdığı gibi. Faz sırası, faz arası
 # yeniden ölçüm, ayrışan cihazın engellenmesi ve devrin `vfioctl` çağrısı tek
 # sahipte kalıyor — ikinci bir kopya, biri donduğunda yıkıcı tarafta durur.
-SYNC_CLI = HERE / "btbond-sync.py"
 
 VERDICT_LABEL = {
     bondsync.MATCH: "eşleşiyor",
@@ -417,8 +415,8 @@ class BtbondTui(App):
 
     def action_sync_all(self) -> None:
         """İki fazlı akışı KAPSAMIN TAMAMI için koştur — CLI'ı çağırarak."""
-        cmd = [str(SYNC_CLI), "sync", "--root", self.root,
-               "--usb-id", self.usb_id]
+        cmd = self_command() + ["sync", "--root", self.root,
+                                "--usb-id", self.usb_id]
         for domain in self.domains:
             cmd += ["--domain", domain]
         for domain, mount in self.offline.items():
@@ -453,9 +451,9 @@ class BtbondTui(App):
     def _after_handover(self, domain, to_side):
         if not to_side:
             return
-        cmd = [str(SYNC_CLI), "handover", "--to", to_side,
-               "--domain", domain, "--usb-id", self.usb_id,
-               "--root", self.root]
+        cmd = self_command() + ["handover", "--to", to_side,
+                                "--domain", domain, "--usb-id", self.usb_id,
+                                "--root", self.root]
         self.push_screen(
             Confirm(f"Radyoyu devret → {to_side}",
                     f"domain: {domain}\nradyo bu taraftan alınıp "
@@ -534,8 +532,8 @@ class BtbondTui(App):
         if not allowed:
             log.write(f"[red]DURDU:[/red] {reason}")
             return
-        cmd = [str(WRITER[direction]), "--domain", domain,
-               "--root", self.root, "--only", row["dev"]]
+        cmd = self_command() + [WRITER[direction], "--domain", domain,
+                                "--root", self.root, "--only", row["dev"]]
         if forced:
             cmd.append("--force")
         if stop_bt:
@@ -606,8 +604,13 @@ def main():
     parser.add_argument("--domain", action="append", dest="domains", metavar="AD",
                         help="kapsamı bu domain(ler)e daralt; verilmezse "
                              "tanımlı bütün domain'ler (CLI ile aynı)")
-    parser.add_argument("--root", default=bluezbond.ROOT)
-    parser.add_argument("--usb-id", default=bondsync.DEFAULT_USB_ID)
+    parser.add_argument("--root", default=bluezbond.ROOT, metavar="DİZİN",
+                        help=f"BlueZ durum dizini (varsayılan {bluezbond.ROOT})")
+    parser.add_argument("--usb-id", default=bondsync.DEFAULT_USB_ID,
+                        metavar="VID:PID",
+                        help="Bluetooth radyosunun USB kimliği (varsayılan "
+                             f"{bondsync.DEFAULT_USB_ID}); radyonun yerini "
+                             "bununla arıyor")
     # CLI ile AYNI yüzey: karar olan bir yetenek CLI'a özel kalmamalı.
     parser.add_argument("--offline", action="append", dest="offline_specs",
                         metavar="DOMAIN=MOUNT", default=[],
@@ -638,7 +641,3 @@ def main():
     BtbondTui(domains, args.root, args.usb_id, offline,
               automount=not args.no_auto_mount,
               stop_bluetooth=not args.no_stop_bluetooth).run()
-
-
-if __name__ == "__main__":
-    main()

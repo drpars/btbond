@@ -22,7 +22,7 @@ one radio, so your devices keep working on whichever side currently owns it.
 > **Offline kovan kanalı da koştu** (2026-09-04): kapalı bir misafirin kovanı
 > okunuyor **ve yazılıyor** — üç bond offline yazıldı, misafir açıldı ve
 > Windows'un kendi kayıt defteri üçünü de aynen verdi. TUI var
-> (`btbond-tui.py`) ve kapalı tarafları da gösteriyor.
+> (`btbond tui`) ve kapalı tarafları da gösteriyor.
 
 ---
 
@@ -56,11 +56,11 @@ BTHPORT\Parameters` tam olarak SYSTEM'e açık bir anahtardır. Sonuç: misafiri
 **kapatmadan**, diski **rebind etmeden**, şifrelemeye **hiç dokunmadan**
 okunup yazılabiliyor.
 
-**Offline kovan** (`hivebond.py`) kapalı misafir ve dual boot için — **iki
-yönde de okuma ve yazma** (`bluez-to-win.py --offline`, `win-to-bluez.py
+**Offline kovan** (`hivebond`) kapalı misafir ve dual boot için — **iki
+yönde de okuma ve yazma** (`btbond to-guest --offline`, `btbond to-host
 --offline`). Zincir: domain kapalı → disk host'ta → bölüm mount → `hivex` →
 `ControlSet00N\Services\BTHPORT\Parameters`. Mount'u araç kendisi yapıyor
-(`sidemount.py`): disk keşfi + `qemu-nbd` + içerikle bölüm seçimi + garantili
+(`sidemount`): disk keşfi + `qemu-nbd` + içerikle bölüm seçimi + garantili
 çözme → "TUI".
 
 Ajanın tek gerçek üstünlüğü **diske erişmek zorunda olmaması** — hız değil,
@@ -210,27 +210,70 @@ vfioctl guest --name <domain> usb --detach <vendor>:<product>
 - Bond'ları okumak/yazmak root gerektirir (`/var/lib/bluetooth` 0700; kovan
   için mount)
 
+`textual` ve `hivex` yokluğu **sessiz değil**: ilkinde `btbond tui` tek satırla
+hangi paketin gerektiğini söyler, ikincisinde offline kanal aynı şekilde düşer.
+
+## Kurulum
+
+```
+pip install .                 # ya da: pip install '.[tui]'  (TUI için textual)
+btbond --help
+```
+
+Arch'ta paket olarak: `packaging/PKGBUILD`. Sistem bağımlılıklarının **gerçek
+listesi orada** — `pyproject.toml`ın `dependencies`i bilerek boş, çünkü
+ihtiyaçların çoğu PyPI paketi değil (`bluez`, `hcitool`, `virsh`, `qemu-nbd`,
+`hivex`) ve pip onları çözemez; oraya yazmak pip'e tutamayacağı bir söz
+verdirirdi.
+
+Kurmadan da koşar — depo kökünden `python -m btbond <alt-komut>`. Araç kendini
+alt süreç olarak çağırdığında (TUI'nin yazıcıları, `sync`in fazları) hangisinin
+kullanıldığını tek yer çözüyor: kurulu `btbond` PATH'te ise o, değilse
+`python -m btbond`. Onay ekranında görünen komut **fiilen koşan** komuttur.
+
+**Dosya düzeni:**
+
+```
+btbond/            # paket — tek giriş noktası `btbond.cli:main`
+├── cli.py         #   ön kapı: bayrak TANIMLAMAZ, alt komuta devreder
+├── runner.py      #   aracın kendini çağırma yolunun tek sahibi
+├── sync.py        #   status / collect / distribute / sync / handover / remote-info
+├── tui.py         #   `btbond tui`  (Textual)
+├── tohost.py      #   `btbond to-host`   — Windows → BlueZ
+├── toguest.py     #   `btbond to-guest`  — BlueZ → Windows
+├── hivebond.py    #   `btbond hive`      — offline kovan kanalının tek sahibi
+├── guestdump.py   #   `btbond guest-dump`
+├── sidemount.py   #   mount zinciri + `btbond cleanup`
+├── bondsync.py    #   iki taraflı durum, diff modeli ve YAZMA KAPISI
+├── bluezbond.py   #   BlueZ `info` biçiminin tek sahibi
+├── winbond.py     #   Windows kayıt defteri düzeninin tek sahibi
+├── hcicapture.py  #   btmon/hcitool ile uzak cihaz bilgisi
+└── agentexec.py   #   `qemu-guest-agent` kanalı
+tests/             # root, misafir, terminal ve kovan GEREKTİRMEZ
+packaging/PKGBUILD
+```
+
 ## Kullanım
 
-**Önce durum: `btbond-sync.py status`.** İki tarafı okur, cihaz cihaz
+**Önce durum: `btbond status`.** İki tarafı okur, cihaz cihaz
 karşılaştırır ve her satırın hükmünü verir — `eşleşiyor`, `yalnız host'ta`,
 `yalnız misafirde`, `ANAHTAR FARKLI`. Radyonun nerede olduğunu iki bağımsız
 kanaldan söyler (host'ta `hciN` düğümü; domain'in canlı XML'inde hostdev).
 
 ```
-sudo tools/btbond-sync.py status               # tablo
-     tools/btbond-sync.py status --json        # {"sides": […], "cross": […]}
-sudo tools/btbond-sync.py sync --dry-run       # topla + dağıt, ne yapılacak
-sudo tools/btbond-sync.py sync --handover      # yaz, sonra radyoyu devret (tek domain)
-sudo tools/btbond-sync.py sync --handover --capture-hci   # + HCI'dan uzak bilgi topla
+sudo btbond status               # tablo
+     btbond status --json        # {"sides": […], "cross": […]}
+sudo btbond sync --dry-run       # topla + dağıt, ne yapılacak
+sudo btbond sync --handover      # yaz, sonra radyoyu devret (tek domain)
+sudo btbond sync --handover --capture-hci   # + HCI'dan uzak bilgi topla
 ```
 
 **Akış iki fazlı, ve sıra zorunlu: `collect` sonra `distribute`.**
 
 ```
-sudo tools/btbond-sync.py collect                    # taraflardan host'a
-sudo tools/btbond-sync.py distribute --domain a --domain b   # host'tan taraflara
-sudo tools/btbond-sync.py sync                       # ikisi, sırayla
+sudo btbond collect                    # taraflardan host'a
+sudo btbond distribute --domain a --domain b   # host'tan taraflara
+sudo btbond sync                       # ikisi, sırayla
 ```
 
 Sebebi fizik: çevre birim **merkez adresi başına tek bond** tutar ve bütün
@@ -253,8 +296,8 @@ komutu `status` basar, kararı kullanıcı verir.
 **Kapsam varsayılanda HERKES; `--domain` daraltır.**
 
 ```
-sudo tools/btbond-sync.py status                    # libvirt'teki bütün domain'ler
-sudo tools/btbond-sync.py status --domain win11     # yalnız biri
+sudo btbond status                    # libvirt'teki bütün domain'ler
+sudo btbond status --domain win11     # yalnız biri
 ```
 
 Argümansız koşu `virsh list --all`daki her domain'i taraf sayar — koşanı ajandan,
@@ -266,8 +309,8 @@ kullanıcının seçimi, ama sessiz değil. Windows olmayan bir domain zarar gö
 diski salt-okuma denenir, Windows kurulumu yoksa satır `ULAŞILAMADI (Windows
 kurulumu bulunamadı)` der.
 
-Tek hedefli araçlar (`handover`, `win-to-bluez.py`, `bluez-to-win.py`,
-`guest-keys-dump.py`) `--domain` verilmezse **tek** tanımlı domain'i alır;
+Tek hedefli araçlar (`handover`, `btbond to-host`, `btbond to-guest`,
+`btbond guest-dump`) `--domain` verilmezse **tek** tanımlı domain'i alır;
 birden çok tanımlıysa tahmin etmez, adlarını listeleyip `--domain` ister.
 
 Ulaşılamayan taraf — kapalı misafir, ajanı yanıt vermeyen misafir — **atlanır**
@@ -288,14 +331,14 @@ alanlarını bildiğinde kuruyor, ve bu dördü **hiçbir BlueZ dosyasında yok*
 cihazdan HCI ile öğrenilir.
 
 ```
-sudo tools/btbond-sync.py remote-info                      # devirsiz topla
-sudo tools/btbond-sync.py sync --handover --capture-hci    # devrin içinde topla
+sudo btbond remote-info                      # devirsiz topla
+sudo btbond sync --handover --capture-hci    # devrin içinde topla
 ```
 
 Devir **gerekmiyor**: iki HCI olayı da var olan bir bağlantıda istenince
 ateşliyor (ölçüldü — üç cihaz, BR/EDR ve LE). `remote-info` bond'lu cihazlara
 bağlanır, komutları yollar, olayları yakalar ve
-`$XDG_STATE_HOME/btbond/remote-info.json`a biriktirir; `bluez-to-win.py` onu
+`$XDG_STATE_HOME/btbond/remote-info.json`a biriktirir; `btbond to-guest` onu
 **kendiliğinden** okur (`--no-remote-info` kapatır). Devir yolu hâlâ en verimli
 an — adaptör sıfırdan kurulurken cihazlar zaten taze bağlanır —, ama yalnız
 radyo **host'a gelirken**: ters yönde cihazlar misafirin içinde bağlanır ve host
@@ -323,8 +366,8 @@ Aşağıdaki iki bölüm tek tek yönleri anlatır; `sync` bu betikleri
 **Windows → Linux replikasyonu.** Sıra önemli: önce yaz, sonra radyoyu al.
 
 ```
-tools/win-to-bluez.py --dry-run                 # ne yazılacak (anahtar basılmaz)
-sudo tools/win-to-bluez.py                      # /var/lib/bluetooth'a yaz
+btbond to-host --dry-run                 # ne yazılacak (anahtar basılmaz)
+sudo btbond to-host                      # /var/lib/bluetooth'a yaz
 vfioctl guest --name <domain> usb --detach 8087:0032   # radyoyu host'a al
 bluetoothctl devices Bonded                     # bond'lar yüklendi mi
 bluetoothctl connect <cihaz-mac>                # asıl sınama
@@ -339,10 +382,10 @@ BTHPORT sürücüsü başlarken — yani radyo devri her iki tarafta da "taze ok
 anıdır.
 
 ```
-sudo tools/bluez-to-win.py --dry-run            # ne yazılacak
-sudo tools/bluez-to-win.py                      # misafirin kayıt defterine yaz
+sudo btbond to-guest --dry-run            # ne yazılacak
+sudo btbond to-guest                      # misafirin kayıt defterine yaz
 vfioctl guest --name <domain> usb --attach 8087:0032   # radyoyu misafire ver
-sudo tools/bluez-to-win.py --remove --only <mac>       # bond'u misafirden sil
+sudo btbond to-guest --remove --only <mac>       # bond'u misafirden sil
 ```
 
 Misafirde zaten olan bond **üzerine yazılmaz**; `--force` gerekir. Betik
@@ -351,8 +394,8 @@ misafire `-EncodedCommand` ile gider ve Windows'un komut satırı sınırı aş�
 bu yüzden yazım partilere bölünür.
 
 ```
-sudo tools/win-to-bluez.py --offline /mnt/win      # kapalı misafirden topla
-sudo tools/win-to-bluez.py --stop-bluetooth        # radyo host'tayken, devirsiz
+sudo btbond to-host --offline /mnt/win      # kapalı misafirden topla
+sudo btbond to-host --stop-bluetooth        # radyo host'tayken, devirsiz
 ```
 
 `--stop-bluetooth` başlatmayı `finally`de yapar (yazım düşse bile Bluetooth
@@ -368,7 +411,7 @@ edildiğinden bağımsızdır. Karşılaştırma sha256'nın ilk 12 hex'i üzeri
 yani çıktı anahtar sızdırmaz ve bayt sırasını da adlandırır:
 
 ```
-sudo tools/win-to-bluez.py --verify
+sudo btbond to-host --verify
   BR/EDR xx:…  "Soundcore Life Q10"
     LinkKey  fp=3de37ff1c11a  EŞLEŞİYOR (aynı sıra)
 ```
@@ -377,17 +420,17 @@ sudo tools/win-to-bluez.py --verify
 (`ad : tip len=N`, baytlar basılmaz):
 
 ```
-tools/guest-keys-dump.py [domain]      # varsayılan: win11-nvme
+btbond guest-dump [domain]      # varsayılan: win11-nvme
 ```
 
-**Kapalı misafir / dual boot — offline kovan** (`hivebond.py`).
+**Kapalı misafir / dual boot — offline kovan** (`hivebond`).
 Misafir **kapalı** olmalı; disk host'ta blok aygıtı olarak görünmeli.
 
 ```
 # doğrudan bir bölüm (dual boot, ya da kapalı passthrough disk)
 sudo mount -t ntfs3 -o ro /dev/<bölüm> /mnt/win
-sudo tools/hivebond.py /mnt/win                 # mount kökünü verin, kovanı bulur
-sudo tools/hivebond.py /mnt/win --dump          # ham satırlar (ajanla aynı biçim)
+sudo btbond hive /mnt/win                 # mount kökünü verin, kovanı bulur
+sudo btbond hive /mnt/win --dump          # ham satırlar (ajanla aynı biçim)
 
 # imaj dosyası (kapalı bir domain'in qcow2'si)
 sudo modprobe nbd max_part=8
@@ -403,12 +446,12 @@ dosyanın kendisi (`Windows/System32/config/SYSTEM`). Bir kurtarma bölümü de
 NTFS'tir ve araç onu reddeder. `CurrentControlSet` offline kovanda **yoktur**;
 gerçek set `Select\Current`ten çözülür.
 
-**Aynı kanaldan yazma** (`bluez-to-win.py --offline`) — mount `rw` olmalı:
+**Aynı kanaldan yazma** (`btbond to-guest --offline`) — mount `rw` olmalı:
 
 ```
 sudo mount -t ntfs3 /dev/<bölüm> /mnt/win
-sudo tools/bluez-to-win.py --offline /mnt/win --dry-run
-sudo tools/bluez-to-win.py --offline /mnt/win
+sudo btbond to-guest --offline /mnt/win --dry-run
+sudo btbond to-guest --offline /mnt/win
 ```
 
 Hedefin **mevcut durumu da bu kanaldan** okunur; yanlış kanaldan okumak
@@ -432,7 +475,7 @@ Kapı sık ateşler: bu makinedeki üç Windows kurulumundan **ikisi** hızlı
 başlatmayı açık taşıyordu.
 
 **Doğrulandı, uçtan uca:** üç bond offline kovana yazıldı (143 işlem, tek
-commit), misafir açıldı, ve `btbond-sync.py status` üçünü de `eşleşiyor`
+commit), misafir açıldı, ve `btbond status` üçünü de `eşleşiyor`
 verdi — yani **Windows'un kendi kayıt defteri motoru** hivex'in yazdığı
 baytları aynen sunuyor. Kalan boşluk: yazımdan sonra radyo o misafire hiç
 verilmediği için **cihazların fiilen bağlandığı** görülmedi, ve **dual boot**
@@ -441,8 +484,8 @@ kolu (domain yerine disk yolu) hiç koşmadı.
 ## TUI
 
 ```
-sudo tools/btbond-tui.py                          # tanımlı bütün domain'ler
-sudo tools/btbond-tui.py --domain win11-nvme      # tek hedef
+sudo btbond tui                          # tanımlı bütün domain'ler
+sudo btbond tui --domain win11-nvme      # tek hedef
 ```
 
 **Bir yön sihirbazı değil, bir diff görünümü.** Açılışta "nereden nereye" diye
@@ -490,7 +533,7 @@ offline taraf, iki fazlı akış ve devir **var**; `--json` (makine çıktısı)
 bayrakları) **yok** — onları tek tuşa bağlamak kullanıcıya ölçülmemiş bir şeyi
 yaptırmak olurdu.
 
-`s` ve `h` mantığı TUI'de **yeniden yazılmadı**: `btbond-sync.py` çağrılıyor,
+`s` ve `h` mantığı TUI'de **yeniden yazılmadı**: `btbond` çağrılıyor,
 tıpkı onun yazıcıları çağırdığı gibi. Faz sırası, faz arası yeniden ölçüm ve
 devrin `vfioctl` çağrısı tek sahipte kalıyor.
 
@@ -508,13 +551,13 @@ domain XML'inden, PCI passthrough `/sys/bus/pci/devices/<adres>/nvme/*/nvme*n*`
 üzerinden (bu makinede `0000:02:00.0` → `/dev/nvme1n1`, yalnız domain
 **kapalıyken**; koşarken cihaz `vfio-pci`'de). Kapsam: yalnız NVMe.
 
-**Mount zincirinin güvenceleri** (`sidemount.py`) — zincir ayrıcalıklı ve
+**Mount zincirinin güvenceleri** (`sidemount`) — zincir ayrıcalıklı ve
 durumlu, araç ortasında ölürse geriye bağlı bir nbd ve mount'lu bir dosya
 sistemi kalır; o yüzden üç güvence, üçü zorunlu: (1) context manager, `__exit__`
 istisnada da koşar ve umount + disconnect'i **ayrı ayrı** dener; (2) her mount
 `/run/btbond/mounted.json`a **PID ile** yazılır, `/run` tmpfs olduğu için
-yeniden başlatmada kendiliğinden temizlenir, çökme sonrası `sidemount.py
-cleanup` ölü PID'lerin kayıtlarını çözer — canlı sürecinkine dokunmaz;
+yeniden başlatmada kendiliğinden temizlenir, çökme sonrası `btbond cleanup`
+ölü PID'lerin kayıtlarını çözer — canlı sürecinkine dokunmaz;
 (3) domain **kapalı değilse reddedilir**. Ölçüldü: gerçek blok aygıtı ve qcow2,
 istisna ortasında çözme, bayat kayıt temizliği, koşan-domain reddi — 19/19.
 Elle mount hâlâ mümkün: `--offline DOMAIN=MOUNT`.
@@ -534,7 +577,7 @@ saatte alındığını söylüyor; bir yazımdan sonra tablo **BAYAT** işaretle
 durduğu bilinmek zorunda).
 
 Kapı TUI'de **yeniden yazılmadı**: `bondsync.write_gate` çağrılıyor, aynı
-fonksiyon `btbond-sync.py`nin fazlarını da kesiyor. İki kopya tutulsaydı biri
+fonksiyon `btbond`un fazlarını da kesiyor. İki kopya tutulsaydı biri
 donar, ve donmuş olan yıkıcı tarafta durur.
 
 Toolkit **Textual** (Python), ve sebebi mimari: uygulama modeli `import`
@@ -564,7 +607,7 @@ kararı sınıyor ama **tuşu** sınamıyordu. O boşlukta `Enter` ölüydü —
 hiç koşmuyor ve aynı sebeple alt çubukta da görünmüyordu. Çare bağın
 `priority=True` olması; onu ancak tuşa basan bir test koruyabilir.
 
-`sidemount.py` bu pakette **değil**: gerçek disk, root ve `nbd` istiyor. Ölçümü
+`sidemount` bu pakette **değil**: gerçek disk, root ve `nbd` istiyor. Ölçümü
 elle yapıldı (2026-09-04, 19/19) ve arşivde kayıtlı; kapalı bir domain ile
 yeniden koşturulabilir.
 
@@ -611,14 +654,14 @@ MIT → [LICENSE](LICENSE).
 - [ ] Adaptör IRK'si: Windows `CentralIRK` ↔ BlueZ yerel kimlik (RPA kullanan
       cihazlar için gerekebilir; üç test cihazının ikisi public, biri static
       random — hiçbiri dönen adres kullanmıyor, yani kol hâlâ ölçülmedi)
-- [x] Tek komutluk akış (`btbond-sync.py status` / `sync`) — yön satırın
+- [x] Tek komutluk akış (`btbond status` / `sync`) — yön satırın
       özelliği, yazma sırası kapı olarak uygulanıyor
-- [x] TUI (`btbond-tui.py`) — diff görünümü, açık/bloklamayan tazeleme,
+- [x] TUI (`btbond tui`) — diff görünümü, açık/bloklamayan tazeleme,
       kapı tek sahipten; toolkit kararı Textual (model import edilir)
-- [x] Offline kovan **okuma** arka ucu (`hivebond.py`) — kapalı misafir ve
+- [x] Offline kovan **okuma** arka ucu (`hivebond`) — kapalı misafir ve
       dual boot; iki taraflı doğrulandı (altı parmak izi ajanla birebir aynı),
       bölüm ve qcow2 kolları ayrı ayrı koştu
-- [x] Offline kovan **yazma** (`bluez-to-win.py --offline`) + hızlı başlatma
+- [x] Offline kovan **yazma** (`btbond to-guest --offline`) + hızlı başlatma
       kapısı — uçtan uca doğrulandı: offline yazılan üç bond, misafir
       açıldıktan sonra Windows'un kendi kayıt defterinden `eşleşiyor` döndü
 - [ ] Offline yazımdan sonra radyoyu o misafire verip **cihazların bağlandığını**
@@ -632,14 +675,14 @@ MIT → [LICENSE](LICENSE).
       arası yeniden ölçümle — tek döngülü biçim N≥2 tarafta yakınsamıyordu
 - [x] Offline taraf `status`ta ve TUI'de görünür (`--offline DOMAIN=MOUNT`),
       diski keşfediliyor, ve okunmamış taraf `ÖLÇÜLMEDİ` diye ayrılıyor
-- [x] Mount otomasyonu (`sidemount.py`): keşif + `qemu-nbd` + içerikle bölüm
+- [x] Mount otomasyonu (`sidemount`): keşif + `qemu-nbd` + içerikle bölüm
       + garantili çözme; CLI ve TUI'de varsayılan
 - [x] Ters yönde offline (`win-to-bluez --offline`) — kapalı taraftan toplama
 - [x] `→ host` yazımında radyo devri yerine bluetoothd stop/start — kapı artık
       "hedef taze okuyabilecek mi" diye soruyor
 - [ ] `→ misafir` için aynısı: Windows BT yığınını PnP'den kapat/aç (ölçülmedi)
 - [x] Öğrenilen dört alan araçla toplanıyor (`remote-info`, devir gerekmez) ve
-      `bluez-to-win.py` onları **yazıyor** — eskiden elle yazılıyorlardı
+      `btbond to-guest` onları **yazıyor** — eskiden elle yazılıyorlardı
 - [x] Aracın yazdığı kayıt, Windows'un hiç görmediği bir cihazda profil
       devnode'larını **sürücüleriyle** doğuruyor ve ses geliyor — eksik parça
       `DynamicCachedServices`ti, altın kayıtla diff bulup tek değişkenli test

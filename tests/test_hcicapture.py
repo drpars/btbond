@@ -16,9 +16,8 @@ import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-TOOLS = HERE.parent / "tools"
-sys.path.insert(0, str(TOOLS))
-import hcicapture  # noqa: E402
+sys.path.insert(0, str(HERE.parent))       # depo kökü → paket olarak import
+from btbond import hcicapture  # noqa: E402
 
 DEV_A = "AA:BB:CC:DD:EE:FF"
 DEV_B = "11:22:33:44:55:66"

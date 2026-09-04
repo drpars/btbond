@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "btbond"
+version = "0.1.0"
+description = "Replicate Bluetooth bonds between a Linux host and a Windows guest sharing one radio"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.11"
+authors = [{ name = "drpars" }]
+keywords = ["bluetooth", "bluez", "vfio", "libvirt", "windows", "pairing"]
+classifiers = [
+    "Environment :: Console",
+    "Intended Audience :: System Administrators",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Topic :: System :: Networking",
+]
+
+# BOŞ, VE BU BİLEREK. Aracın çalışması için gereken şeylerin çoğu PyPI
+# paketi değil sistem paketi: `bluez`, `hcitool` (`bluez-deprecated-tools`),
+# `libvirt`/`virsh`, `qemu-nbd`, ve `hivex`in Python bağlaması. Bunları
+# `dependencies`e yazmak pip'e çözemeyeceği bir söz verdirir; gerçek liste
+# README'de ve PKGBUILD'de duruyor. `hivex` ve `textual` yokluğu da sessiz
+# değil: ilki `try/except ImportError` ile eleniyor, ikincisi yalnız `tui`
+# alt komutu import edildiğinde isteniyor.
+dependencies = []
+
+[project.optional-dependencies]
+# TUI'nin tek PyPI bağımlılığı. CLI onsuz tam çalışır, o yüzden zorunlu değil.
+tui = ["textual>=0.80"]
+
+[project.urls]
+Homepage = "https://github.com/drpars/btbond"
+Source = "https://github.com/drpars/btbond"
+
+[project.scripts]
+btbond = "btbond.cli:main"
+
+[tool.setuptools]
+packages = ["btbond"]

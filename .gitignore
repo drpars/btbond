@@ -38,6 +38,9 @@ __pycache__/
 *.pyc
 *.egg-info/
 .venv/
+# Paketleme çıktısı — `pip install .` ve `python -m build` üretiyor.
+build/
+dist/
 
 # Editor / OS
 *.swp

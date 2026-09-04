@@ -18,18 +18,19 @@ MAKİNEYE ÖZEL KİMLİK YOK: MAC'ler uydurma, parmak izleri dolgu.
 """
 
 import asyncio
-import importlib.util
 import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-TOOLS = HERE.parent / "tools"
-sys.path.insert(0, str(TOOLS))
-import bondsync  # noqa: E402
+sys.path.insert(0, str(HERE.parent))       # depo kökü → paket olarak import
+from btbond import bondsync  # noqa: E402
+from btbond import runner  # noqa: E402
 
-_spec = importlib.util.spec_from_file_location("btbond_tui", TOOLS / "btbond-tui.py")
-tui = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(tui)
+# ÖNEMLİ: `bondsync` ile TUI'nin gördüğü `bondsync` AYNI modül nesnesi olmak
+# zorunda — testler `bondsync.survey_all`i yamalayarak ölçüm yapıyor. Eskiden
+# `spec_from_file_location` ayrı bir modül nesnesi üretme riski taşıyordu;
+# paket import'u bunu tanımı gereği kapatıyor.
+from btbond import tui  # noqa: E402
 
 ADAPTER = "00:11:22:33:44:55"
 OK = FAIL = 0
@@ -255,9 +256,15 @@ async def t_parity():
         check("sync onay ekranı açıldı", isinstance(app.screen, tui.Confirm), True)
         check("onaysız koşmadı", ran, [])
         cmd = app.screen._command
-        check("CLI'ı çağırıyor (ikinci kopya yok)",
-              Path(cmd[0]).name, "btbond-sync.py")
-        check("faz komutu sync", cmd[1], "sync")
+        # ÖLÇÜLEN ŞEY TAŞIYICI DEĞİL SAHİPLİK: komut aracın kendi ön kapısına
+        # gidiyor mu, ve alt komut doğru mu. Önek `self_command()`ten geliyor
+        # (kurulu paketle `btbond`, depodan `python -m btbond`), o yüzden
+        # burada dize sabitlenmiyor — sabitlenseydi test kurulum biçimine
+        # bağlanır ve kurulu makinede yanlış yere düşerdi.
+        prefix = runner.self_command()
+        check("aracın kendi ön kapısını çağırıyor (ikinci kopya yok)",
+              cmd[:len(prefix)], prefix)
+        check("faz komutu sync", cmd[len(prefix)], "sync")
         check("kapsam geçiyor", [c for c in cmd if c in ("d1", "d2")], ["d1", "d2"])
         check("offline eşlemesi geçiyor", "d2=/mnt/x" in cmd, True)
         app.screen.dismiss(None)
@@ -275,8 +282,8 @@ async def t_parity():
         await driver.pause()
         check("hedef seçilince onay ekranı", isinstance(app.screen, tui.Confirm), True)
         hcmd = app.screen._command
-        check("devir de CLI'dan", Path(hcmd[0]).name, "btbond-sync.py")
-        check("handover komutu", (hcmd[1], hcmd[2], hcmd[3]),
+        check("devir de aynı ön kapıdan", hcmd[:len(prefix)], prefix)
+        check("handover komutu", tuple(hcmd[len(prefix):len(prefix) + 3]),
               ("handover", "--to", "host"))
         app.screen.dismiss(None)
         await driver.pause()

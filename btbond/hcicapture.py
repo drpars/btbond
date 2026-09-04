@@ -72,7 +72,7 @@ from pathlib import Path
 # Hangi alanın BR/EDR'ye özel olduğu kayıt defteri DÜZENİNİN olgusu, o yüzden
 # sahibi `winbond`; burada yalnız cümle kurmak için okunuyor. `winbond` bu
 # modülü import etmiyor, yani döngü yok (ölçüldü: yalnız hashlib + uuid).
-import winbond                                                # noqa: E402
+from . import winbond
 
 # Olay başlığı: `> HCI Event: Read Remote Supported Features (0x0b) plen 11 …`
 # AD DEĞİL KOD eşleştiriliyor, ve sebebi ölçüldü (2026-09-04): btmon satırı

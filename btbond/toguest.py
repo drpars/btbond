@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Host BlueZ'in bond'larını misafir Windows'a replike et (Linux → Windows).
 
-`win-to-bluez.py`'nin simetriği. Kaynak
+`btbond to-host`'nin simetriği. Kaynak
 `/var/lib/bluetooth/<adaptör>/<cihaz>/info` (root gerekir), hedef
 `BTHPORT\\Parameters`.
 
@@ -37,24 +37,23 @@ GİZLİLİK: anahtar baytları stdout'a **basılmaz**; ekrana yalnız parmak izi
 (sha256'nın ilk 12 hex'i) düşer. `--dry-run` de baytları basmaz.
 
 Kullanım:
-    sudo tools/bluez-to-win.py --dry-run            # ne yazılacak
-    sudo tools/bluez-to-win.py                      # misafire yaz
-    sudo tools/bluez-to-win.py --only E8:07:BF:A0:55:B4 --force
-    sudo tools/bluez-to-win.py --remove --only <mac> # bond'u misafirden sil
-    sudo tools/bluez-to-win.py --offline /mnt/win     # kapalı misafir / dual boot
+    sudo btbond to-guest --dry-run            # ne yazılacak
+    sudo btbond to-guest                      # misafire yaz
+    sudo btbond to-guest --only E8:07:BF:A0:55:B4 --force
+    sudo btbond to-guest --remove --only <mac> # bond'u misafirden sil
+    sudo btbond to-guest --offline /mnt/win     # kapalı misafir / dual boot
 """
 
 import argparse
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-import bluezbond  # noqa: E402
-import winbond  # noqa: E402
-import agentexec  # noqa: E402
-import hcicapture  # noqa: E402
-import hivebond  # noqa: E402
-from agentexec import run_powershell  # noqa: E402
+from . import bluezbond
+from . import winbond
+from . import agentexec
+from . import hcicapture
+from . import hivebond
+from .agentexec import run_powershell
 
 
 # Betik misafire `-EncodedCommand` ile gidiyor: UTF-16LE + base64, yani komut
@@ -433,12 +432,3 @@ def main():
     if not args.remove:
         print("Windows bunları BTHPORT sürücüsü başlarken okur — radyoyu ŞİMDİ verin:")
         print(f"  vfioctl guest --name {args.domain} usb --attach 8087:0032")
-
-
-if __name__ == "__main__":
-    # Taşıyıcı hatasını mesaja çeviren yer → `win-to-bluez.py`deki aynı yorum.
-    # İki kanal, iki hata tipi; ikisi de tek satıra iner.
-    try:
-        main()
-    except (agentexec.AgentError, hivebond.HiveError) as exc:
-        sys.exit(str(exc))

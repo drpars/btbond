@@ -28,7 +28,7 @@ class AgentError(RuntimeError):
     değil kural.
 
     `RuntimeError`dan türüyor çünkü `bondsync.survey` zaten onu atıyor ve
-    `btbond-sync.py` onu yakalayıp tek satır mesaja çeviriyor — yani
+    `btbond` onu yakalayıp tek satır mesaja çeviriyor — yani
     çalıştırılabilirlerin davranışı korunuyor, yalnız kütüphane artık
     çağıranın kararına karışmıyor.
     """

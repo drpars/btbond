@@ -1,7 +1,7 @@
 """Windows tarafı: `BTHPORT\\Parameters` bond düzeni — okuma, ayrıştırma, yazma.
 
 Bu modül **ölçülmüş kayıt defteri düzeninin tek sahibidir**. İki yön de
-(`win-to-bluez.py`, `bluez-to-win.py`) düzeni buradan okur; iki kopya tutulsaydı
+(`btbond to-host`, `btbond to-guest`) düzeni buradan okur; iki kopya tutulsaydı
 biri ilerler, öbürü donar ve donduğunu okuyucuya söylemezdi.
 
 ÖLÇÜLMÜŞ DÜZEN (2026-09-03, Windows 11 misafir, iki gerçek cihaz eşleştirilerek):

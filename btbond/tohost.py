@@ -18,11 +18,11 @@ GİZLİLİK: anahtar baytları stdout'a **basılmaz**, yalnız `info` dosyasına
 0600 ile yazılır. `--dry-run` de baytları basmaz.
 
 Kullanım:
-    sudo tools/win-to-bluez.py                      # yaz (varsayılan domain)
-    tools/win-to-bluez.py --dry-run                 # yalnız yapıyı göster
-    sudo tools/win-to-bluez.py --key-order reverse --force
-    sudo tools/win-to-bluez.py --offline /mnt/win   # kapalı misafirden topla
-    sudo tools/win-to-bluez.py --stop-bluetooth     # radyo host'tayken, devirsiz
+    sudo btbond to-host                      # yaz (varsayılan domain)
+    btbond to-host --dry-run                 # yalnız yapıyı göster
+    sudo btbond to-host --key-order reverse --force
+    sudo btbond to-host --offline /mnt/win   # kapalı misafirden topla
+    sudo btbond to-host --stop-bluetooth     # radyo host'tayken, devirsiz
 """
 
 import argparse
@@ -32,12 +32,11 @@ import sys
 import time
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-import bluezbond  # noqa: E402
-import winbond  # noqa: E402
-import agentexec  # noqa: E402
-import hivebond  # noqa: E402
-from agentexec import run_powershell  # noqa: E402
+from . import bluezbond
+from . import winbond
+from . import agentexec
+from . import hivebond
+from .agentexec import run_powershell
 
 fingerprint = winbond.fingerprint
 
@@ -116,7 +115,7 @@ def main():
     parser.add_argument("--verify", action="store_true",
                         help="yazma; iki tarafın aynı anahtarı taşıdığını parmak iziyle doğrula")
     # KAPALI MİSAFİRDEN TOPLAMA: kaynak ajan yerine mount edilmiş kovan.
-    # `bluez-to-win.py --offline`in aynası; kanal seçimi kaynağı değiştiriyor,
+    # `btbond to-guest --offline`in aynası; kanal seçimi kaynağı değiştiriyor,
     # hedef (host) aynı.
     parser.add_argument("--offline", metavar="MOUNT",
                         help="misafiri ajan yerine offline kovandan oku "
@@ -281,13 +280,3 @@ def replicate(adapters, names, devices, args, only):
             written += bluezbond.write_info(args.root, adapter, dev, content,
                                             args.force, args.dry_run)
     return written
-
-
-if __name__ == "__main__":
-    # Ajan hatasını MESAJA çeviren yer burası: `agentexec` artık `sys.exit`
-    # çağırmıyor (kütüphane çağıranın kararına karışmaz), o yüzden tek satır
-    # hata metnini çalıştırılabilir basar — yoksa traceback'e dönerdi.
-    try:
-        main()
-    except (agentexec.AgentError, hivebond.HiveError) as exc:
-        sys.exit(str(exc))

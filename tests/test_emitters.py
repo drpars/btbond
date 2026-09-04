@@ -25,8 +25,12 @@ import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-sys.path.insert(0, str(HERE.parent / "tools"))
-import winbond  # noqa: E402
+# Yola DEPO KÖKÜ konuyor, `btbond/` değil: modüller artık paket üyesi ve göreli
+# import kullanıyor, yani paket dizinini doğrudan yola koymak
+# `ImportError: attempted relative import with no known parent package` verir.
+# Kurulu paketle koşulduğunda bu satır zararsız — `btbond` zaten bulunur.
+sys.path.insert(0, str(HERE.parent))
+from btbond import winbond  # noqa: E402
 
 GOLDEN = HERE / "golden-emitters.txt"
 

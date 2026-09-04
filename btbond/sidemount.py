@@ -33,8 +33,7 @@ import sys
 import time
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-import hivebond  # noqa: E402
+from . import hivebond
 
 MOUNT_ROOT = Path("/run/btbond")
 MARKER = MOUNT_ROOT / "mounted.json"
@@ -243,15 +242,20 @@ class Mounted:
 
 
 def main():
-    """`sidemount.py cleanup` — çökme sonrası elle temizlik."""
-    if len(sys.argv) == 2 and sys.argv[1] == "cleanup":
-        n = cleanup_stale()
-        print(f"{n} bayat kayıt çözüldü; kalan: {list(_load_marker()) or 'yok'}")
+    """`btbond cleanup` — çökme sonrası elle temizlik.
+
+    Alt komut adı `cli`de duruyor; burada yalnız argümansız çağrı bekleniyor,
+    çünkü ön kapı `cleanup` sözcüğünü zaten tüketiyor.
+    """
+    if len(sys.argv) > 1 and sys.argv[1] in ("-h", "--help"):
+        print("kullanım: btbond cleanup   (argüman almaz)\n\n"
+              "Çökme ya da kill sonrası ARDA KALAN mount/nbd kayıtlarını çözer. "
+              "Normal koşuda gerekmez:\nbağlama `Mounted` bağlamıyla yapılıyor ve "
+              "çıkışta kendiliğinden çözülüyor.")
         return 0
-    print(__doc__.splitlines()[0])
-    print("kullanım: sidemount.py cleanup")
-    return 2
-
-
-if __name__ == "__main__":
-    sys.exit(main())
+    if len(sys.argv) > 1:
+        print("kullanım: btbond cleanup   (argüman almaz)", file=sys.stderr)
+        return 2
+    n = cleanup_stale()
+    print(f"{n} bayat kayıt çözüldü; kalan: {list(_load_marker()) or 'yok'}")
+    return 0

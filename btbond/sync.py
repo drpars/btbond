@@ -13,7 +13,7 @@ Yön satırın özelliğidir, oturumun değil → `bondsync`. `key-mismatch` sat
 bir bond'u yok eder. O satır için komut basılır, kararı kullanıcı verir.
 
 Yazma işini bu betik kendi yapmaz; her yönün tek sahibi kendi betiğidir
-(`win-to-bluez.py`, `bluez-to-win.py`) ve buradan `--only <mac>` ile
+(`btbond to-host`, `btbond to-guest`) ve buradan `--only <mac>` ile
 çağrılır — mantığın ikinci bir kopyası çıkmasın diye.
 
 Kapsam kullanıcının seçimi: `--domain` **tekrarlanabilir**. Verilmezse
@@ -35,14 +35,14 @@ taraf taraf iki yönü birden yürüten eski biçim bu yüzden **yakınsamıyord
 A'dan çekilen cihaz B'nin bayat "yalnız host'ta" kümesine hiç girmiyordu.
 
 Kullanım:
-    sudo tools/btbond-sync.py status
-    sudo tools/btbond-sync.py status --domain win11-nvme --domain win11
-    tools/btbond-sync.py status --json          # {"sides": […], "cross": […]}
-    sudo tools/btbond-sync.py sync --dry-run          # topla + dağıt
-    sudo tools/btbond-sync.py collect                 # yalnız taraflardan host'a
-    sudo tools/btbond-sync.py distribute --domain a --domain b   # host'tan taraflara
-    sudo tools/btbond-sync.py sync --handover         # tek domain ister
-    sudo tools/btbond-sync.py handover --to host --capture-hci   # tek domain
+    sudo btbond status
+    sudo btbond status --domain win11-nvme --domain win11
+    btbond status --json          # {"sides": […], "cross": […]}
+    sudo btbond sync --dry-run          # topla + dağıt
+    sudo btbond collect                 # yalnız taraflardan host'a
+    sudo btbond distribute --domain a --domain b   # host'tan taraflara
+    sudo btbond sync --handover         # tek domain ister
+    sudo btbond handover --to host --capture-hci   # tek domain
 """
 
 import argparse
@@ -53,18 +53,16 @@ import sys
 import time
 from pathlib import Path
 
-HERE = Path(__file__).resolve().parent
-sys.path.insert(0, str(HERE))
-import agentexec  # noqa: E402
-import bluezbond  # noqa: E402
-import bondsync  # noqa: E402
-import hcicapture  # noqa: E402
-import sidemount  # noqa: E402
+from . import agentexec
+from . import bluezbond
+from . import bondsync
+from . import hcicapture
+from . import sidemount
+from .runner import self_command
 
-WRITER = {
-    "to-host": HERE / "win-to-bluez.py",
-    "to-guest": HERE / "bluez-to-win.py",
-}
+# Yazıcılar ayrı betik değil AYNI ARACIN alt komutları; çağrı yolunun tek
+# sahibi `runner.self_command` (→ oradaki docstring).
+WRITER = {"to-host": "to-host", "to-guest": "to-guest"}
 
 VERDICT_LABEL = {
     bondsync.MATCH: "eşleşiyor",
@@ -328,10 +326,14 @@ def print_mismatch_advice(state):
         return
     print("Kendiliğinden çözülmeyen satırlar (hangi tarafın yeni olduğunu araç "
           "bilemez; yanlış seçim çalışan bond'u yok eder):")
+    # Basılan komut KULLANICININ YAZACAĞI komut olmalı, o yüzden çağrı yolu
+    # burada da `self_command`den geliyor — kurulu paketle `btbond …`,
+    # depodan koşulurken `python -m btbond …`.
+    prefix = " ".join(self_command())
     for row in blocked:
-        for direction, script in WRITER.items():
+        for direction, subcommand in WRITER.items():
             print(f"  {row['dev']}  {DIRECTION_ARROW[direction]:<10} "
-                  f"sudo {script.relative_to(HERE.parent)} --only {row['dev']} --force")
+                  f"sudo {prefix} {subcommand} --only {row['dev']} --force")
     print()
 
 
@@ -379,8 +381,8 @@ def run_phase(args, state, direction, blocked_devs=()):
     # fark hiçbir yerde görünmez.
     # Domain `state`ten alınır, `args`tan DEĞİL: `--domain` tekrarlanabilir
     # ve bu fonksiyon taraf başına bir kez koşuyor.
-    cmd = ["sudo", str(WRITER[direction]),
-           "--domain", state["domain"], "--root", args.root]
+    cmd = ["sudo"] + self_command() + [
+        WRITER[direction], "--domain", state["domain"], "--root", args.root]
     for row in rows:
         cmd += ["--only", row["dev"]]
     if args.force:
@@ -488,17 +490,32 @@ def run_phases(args, survey, domains, directions, offline=None):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    # Alt komutların NE YAPTIĞI burada yazılı, ve bu bir eksiğin kapatılması:
+    # `--help` eskiden yalnız adları listeliyordu, yani `status` ile `collect`
+    # farkını yardım hiç söylemiyordu.
     parser.add_argument("command",
                         choices=("status", "collect", "distribute", "sync",
-                                 "handover", "remote-info"))
+                                 "handover", "remote-info"),
+                        help="status: oku ve karşılaştır (yazmaz)  |  "
+                             "collect: taraflardan host'a  |  "
+                             "distribute: host'tan taraflara  |  "
+                             "sync: collect + yeniden ölç + distribute  |  "
+                             "handover: radyoyu devret (--to)  |  "
+                             "remote-info: HCI'dan öğrenilen alanları topla")
     # TEKRARLANABİLİR ve DARALTICI: verilmezse libvirt'teki BÜTÜN domain'ler
     # işlenir (kapalı olanlar otomatik bağlanıp okunur); `--domain` kapsamı
     # daraltır ve dokunulmayanlar notta adlandırılır → `agentexec.resolve_scope`.
     parser.add_argument("--domain", action="append", dest="domains", metavar="AD",
                         help="kapsamı bu domain(ler)e daralt; verilmezse "
                              "tanımlı bütün domain'ler")
-    parser.add_argument("--root", default=bluezbond.ROOT)
-    parser.add_argument("--usb-id", default=bondsync.DEFAULT_USB_ID)
+    parser.add_argument("--root", default=bluezbond.ROOT, metavar="DİZİN",
+                        help=f"BlueZ durum dizini (varsayılan {bluezbond.ROOT}); "
+                             "test kopyasına karşı koşmak için")
+    parser.add_argument("--usb-id", default=bondsync.DEFAULT_USB_ID,
+                        metavar="VID:PID",
+                        help="Bluetooth radyosunun USB kimliği (varsayılan "
+                             f"{bondsync.DEFAULT_USB_ID}); radyonun nerede olduğunu "
+                             "bununla arıyor, başka makinede değişir")
     # OFFLINE TARAF: misafir KAPALI, kovan host'tan mount edilmiş. Biçim
     # `DOMAIN=MOUNT`, çünkü N taraflı bir yüzeyde mount'un hangi tarafa ait
     # olduğu söylenmek zorunda → `bondsync.parse_offline_specs`.
@@ -660,7 +677,3 @@ def main():
     if scope_warning:
         print(f"\nKAPSAM: {scope_warning}")
     return exit_code
-
-
-if __name__ == "__main__":
-    sys.exit(main())

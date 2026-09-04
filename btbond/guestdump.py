@@ -14,15 +14,14 @@ BD_ADDR'i olduğu için görünür; onlar anahtar materyali değildir.
 
 Bu bir ÖLÇÜM aracıdır, senkron aracı değil: hiçbir şey yazmaz.
 
-Kullanım:  ./guest-keys-dump.py [domain]        (verilmezse tek tanımlı olan)
+Kullanım:  btbond guest-dump [DOMAIN]        (verilmezse tek tanımlı olan)
 """
 
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-import agentexec  # noqa: E402
-from agentexec import run_powershell  # noqa: E402
+from . import agentexec
+from .agentexec import run_powershell
 
 BTHPORT = r"HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Keys"
 
@@ -61,7 +60,24 @@ Get-PnpDevice -ErrorAction SilentlyContinue |
 """
 
 
+USAGE = """\
+kullanım: btbond guest-dump [DOMAIN]
+
+Misafirin bond YAPISINI basar — salt-okuma, hiçbir şey yazmaz. DOMAIN
+verilmezse tanımlı tek domain alınır; birden çoksa tahmin edilmez.
+Ajan kanalı kullanılır, yani misafir KOŞUYOR olmalı; kapalı misafir için
+`btbond hive <mount>`.
+"""
+
+
 def main():
+    # `--help` ELLE, çünkü bu alt komut argparse kullanmıyor (tek konumsalı
+    # var). Ölçüldü (2026-09-04, kurulu pakette): yardımı olmadığı için
+    # `btbond guest-dump --help` `--help`i domain adı sanıp ajana gidiyor ve
+    # anlaşılmaz bir hatayla düşüyordu.
+    if len(sys.argv) > 1 and sys.argv[1] in ("-h", "--help"):
+        print(USAGE, end="")
+        return 0
     domain, why = agentexec.single_domain(sys.argv[1] if len(sys.argv) > 1 else None,
                                           "guest-keys-dump")
     if why:
@@ -76,11 +92,3 @@ def main():
     # PowerShell stderr'e CLIXML ilerleme gürültüsü yazar; exitcode=0 ise o
     # gürültü hata değildir. Hükmü çıkış kodu taşır, stderr'in doluluğu değil.
     print(f"exitcode={exitcode}")
-
-
-if __name__ == "__main__":
-    # Ajan hatasını mesaja çeviren yer → `win-to-bluez.py`deki aynı yorum.
-    try:
-        main()
-    except agentexec.AgentError as exc:
-        sys.exit(str(exc))

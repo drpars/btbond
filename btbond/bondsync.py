@@ -1,7 +1,7 @@
 """İki tarafın bond durumunu tek modelde topla — **yönsüz**.
 
 Bu modül replikasyon YAPMAZ: iki tarafı okur, cihaz cihaz karşılaştırır ve her
-satırın hükmünü verir. Yürütme `btbond-sync.py`nin işi.
+satırın hükmünü verir. Yürütme `btbond`un işi.
 
 TASARIM KARARI — **yön satırın özelliğidir, oturumun değil.** "Nereden nereye"
 diye baştan sorulan bir kip, cevabı ölçülebilen bir soruyu kullanıcıya
@@ -25,13 +25,12 @@ import sys
 from pathlib import Path
 from xml.etree import ElementTree
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-import bluezbond  # noqa: E402
-import winbond  # noqa: E402
-import agentexec  # noqa: E402
-import hivebond  # noqa: E402
-import sidemount  # noqa: E402
-from agentexec import run_powershell  # noqa: E402
+from . import bluezbond
+from . import winbond
+from . import agentexec
+from . import hivebond
+from . import sidemount
+from .agentexec import run_powershell
 
 # Bu makinenin radyosu; başka makinede değişir, o yüzden CLI'dan geçilebiliyor.
 DEFAULT_USB_ID = "8087:0032"
@@ -81,7 +80,7 @@ def write_gate(radio, direction, stack_restart=False):
     biliyordu ve host için yazılımsal bir probleme donanım devri dayatıyordu;
     kullanıcı haklı olarak itiraz etti. `stack_restart=True` ikinci cevabı
     taşıyor: host radyoyu tutsa da `bluetoothd` durdurulup başlatılacaksa
-    yazım etkili olur (`win-to-bluez.py --stop-bluetooth`).
+    yazım etkili olur (`btbond to-host --stop-bluetooth`).
 
     Misafir tarafında karşılığı (Windows BT yığınını PnP'den kapat/aç)
     **ölçülmedi**, o yüzden `to-guest` için bu kaçış yok.
@@ -273,8 +272,8 @@ def _verdict(host_row, guest_row):
 def parse_offline_specs(values):
     """`DOMAIN=MOUNT` listesini sözlüğe çevir. Döner: `(eşleme, hata|None)`.
 
-    İKİ ÖN YÜZ İÇİN ORTAK: `btbond-sync.py` de TUI de aynı biçimi alıyor, ve
-    ayrıştırma burada duruyor ki ikinci bir kopya doğmasın. `bluez-to-win.py`
+    İKİ ÖN YÜZ İÇİN ORTAK: `btbond` de TUI de aynı biçimi alıyor, ve
+    ayrıştırma burada duruyor ki ikinci bir kopya doğmasın. `btbond to-guest`
     çıplak bir mount alıyor çünkü tek hedefli — N taraflı bir yüzeyde mount'un
     HANGİ tarafa ait olduğu söylenmek zorunda.
     """

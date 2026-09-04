@@ -12,21 +12,18 @@ MAKİNEYE ÖZEL KİMLİK YOK: MAC'ler uydurma, anahtarlar dolgu. Depo public.
 """
 
 import base64
-import importlib.util
 import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-TOOLS = HERE.parent / "tools"
-sys.path.insert(0, str(TOOLS))
-import bondsync  # noqa: E402
-import hivebond  # noqa: E402
-import winbond  # noqa: E402
+sys.path.insert(0, str(HERE.parent))       # depo kökü → paket olarak import
+from btbond import bondsync  # noqa: E402
+from btbond import hivebond  # noqa: E402
+from btbond import winbond  # noqa: E402
 
-# `btbond-sync.py` tire içerdiği için normal import edilemiyor.
-_spec = importlib.util.spec_from_file_location("btbond_sync", TOOLS / "btbond-sync.py")
-btbond_sync = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(btbond_sync)
+# Eskiden `spec_from_file_location` gerekiyordu çünkü dosya adı `btbond-sync.py`
+# idi ve tire içeren ad import edilemez. Paketlemeyle ad `btbond/sync.py` oldu.
+from btbond import sync as btbond_sync  # noqa: E402
 
 ADAPTER_HEX = "001122334455"
 DEV_HEX = "aabbccddeeff"
@@ -113,7 +110,7 @@ print("\n=== ÇİFT KİP: yazıcı iki anahtar bölümünü de KORUYOR ===")
 # siliyordu — `[LinkKey]` `PRESERVED_SECTIONS`ta olmadığı için `merge_preserved`
 # de kurtarmıyordu. Hata yok, rc=0, geriye yalnız `SupportedTechnologies=LE;`
 # kalıyordu. Bu denetim tam o sessiz kaybı kilitliyor.
-import bluezbond  # noqa: E402
+from btbond import bluezbond  # noqa: E402
 _dual = bluezbond.bond_info(
     "Test", "asis",
     link_key=entry["bredr"][DEV_MAC], key_type=4,
@@ -258,7 +255,7 @@ check("misafir tutuyor, restart bayrağı misafiri GEÇİRMEZ (ölçülmedi)",
 print("\n=== kapsam: argümansız = TANIMLI HERKES, --domain daraltır ===")
 # Eski davranış (tek varsayılan + "dokunulmayan N domain" uyarısı) kullanıcıyı
 # her koşuda üç --domain yazmaya mahkûm ediyordu; kaldırıldı (2026-09-04).
-import agentexec
+from btbond import agentexec
 _real_discover = agentexec.discover_domains
 try:
     agentexec.discover_domains = lambda uri=None: ["a", "b", "c"]
@@ -291,10 +288,7 @@ print("ajan taşıyıcısı — Windows komut satırı sınırı")
 # `guest-exec` "Failed to execute helper program (Invalid argument)" veriyordu.
 # Offline kanalda görünmüyordu (hivex'in komut satırı yok), o yüzden arıza
 # aylarca sessiz kaldı. Bölmek ara temsil (`*_ops`) geldikten sonra güvenli.
-_b2w_spec = importlib.util.spec_from_file_location("bluez_to_win",
-                                                   TOOLS / "bluez-to-win.py")
-bluez_to_win = importlib.util.module_from_spec(_b2w_spec)
-_b2w_spec.loader.exec_module(bluez_to_win)
+from btbond import toguest as bluez_to_win  # noqa: E402
 
 small = [(winbond.KEY, r"\Y"), (winbond.ECHO, "OK bredr small")]
 big = ([(winbond.KEY, r"\X")]
