@@ -44,6 +44,14 @@ def cases():
         ADAPTER, DEV, "Test Kulaklık", False, {"COD": 2360324},
         [UUID_A, UUID_B], {"0": "bb" * 8, "1": "cc" * 8})
 
+    # `DynamicCachedServices`: BlueZ'in kaydı (DES 8-bit, `35 LL …`) Windows'un
+    # sarmalına (`36 00LL …`) çevrilerek yazılır — beş gerçek kayıtta bayt bayt
+    # doğrulandı (→ `winbond.DYNAMIC_NOTU`). Vaka 02'nin `bb…`/`cc…` dolguları
+    # 0x35 ile başlamadığı için oraya GİRMEZ (uydurma sarmal yazılmaz); burada
+    # SDP biçimli bir dolgu var: 0x35, uzunluk 6, altı bayt gövde.
+    yield "02b record BR/EDR + SDP biçimli kayıt", winbond.device_record_script(
+        ADAPTER, DEV, "", False, {}, [UUID_A], {"00010000": "3506" + "0900" + "0a00" + "0100"})
+
     yield "03 record BR/EDR minimal", winbond.device_record_script(
         ADAPTER, DEV, "", False, {}, [], None)
 

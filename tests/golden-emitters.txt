@@ -36,6 +36,32 @@ Set-Str 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabb
 Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455\{0000110e-0000-1000-8000-00805f9b34fb}\C00000000' 'CounterInstanceId' 0
 Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455\{0000110e-0000-1000-8000-00805f9b34fb}\C00000000' 'Enabled' 1
 'OK record aabbccddeeff'
+===== 02b record BR/EDR + SDP biçimli kayıt =====
+Ensure-Key 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff'
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff' 'DibServiceVersion' 131072
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff' 'LocalEvaldIoCap' 1
+Ensure-Key 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455'
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455' 'AuthenticationRequirements' 5
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455' 'BRFlags' 0
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455' 'BasebandSupport' 16384
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455' 'IoCapability' 1
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455' 'RemoteAuthenticationRequirements' 5
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455' 'SSP MITM Protected' 1
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455' 'SSP Paired' 1
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455' 'SSP Supported' 1
+Set-Qw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455' 'BRExtendedDeviceInfoFlags' 0
+Ensure-Key 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\CachedServices'
+Set-Bin 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\CachedServices' '00010000' '350609000a000100'
+Ensure-Key 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\DynamicCachedServices'
+Set-Bin 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\DynamicCachedServices' '00010000' '36000609000a000100'
+Ensure-Key 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455\{0000110b-0000-1000-8000-00805f9b34fb}'
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455\{0000110b-0000-1000-8000-00805f9b34fb}' 'Instance' 1
+Ensure-Key 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455\{0000110b-0000-1000-8000-00805f9b34fb}\C00000000'
+Set-Zeros 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455\{0000110b-0000-1000-8000-00805f9b34fb}\C00000000' 'PriLangServiceName' 256
+Set-Str 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455\{0000110b-0000-1000-8000-00805f9b34fb}\C00000000' 'DeviceString' ''
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455\{0000110b-0000-1000-8000-00805f9b34fb}\C00000000' 'CounterInstanceId' 0
+Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff\ServicesFor001122334455\{0000110b-0000-1000-8000-00805f9b34fb}\C00000000' 'Enabled' 1
+'OK record aabbccddeeff'
 ===== 03 record BR/EDR minimal =====
 Ensure-Key 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff'
 Set-Dw 'HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\aabbccddeeff' 'DibServiceVersion' 131072

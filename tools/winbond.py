@@ -568,6 +568,48 @@ def remote_ops(dev_path, is_le, remote):
     return ops
 
 
+DYNAMIC_NOTU = """`DynamicCachedServices` — Windows'un servis DÜĞÜMLERİNİ açtığı liste.
+
+ÖLÇÜLDÜ (2026-09-04, `win11-nvme`, Windows'un KENDİ eşleştirmesiyle yazılmış
+altın kayıt ↔ aracın kaydı diff'i, 46 değer aynı): araç `CachedServices`i
+BlueZ'in kayıtlarıyla dolduruyordu ve o altında da birebir aynı — ama Windows
+servis düğümlerini ondan DEĞİL `DynamicCachedServices`ten açıyor. O yokken
+Windows altı servisten yalnız sürücüsüz ikisi için düğüm açtı, A2DP sürücüsü
+hiç bağlanmadı, link ~20 sn'de düştü; `EirData`, `FriendlyName`,
+`HostSupportedFeaturesMap` ve enumerasyon dürtmesi tek tek elendi.
+
+İÇERİK AYNI VERİ: BlueZ'in `cache/<mac>` `[ServiceRecords]`ı = Windows'un
+SDP sorgusu; tek fark dış sarmalın uzunluk kodlaması —
+    BlueZ    35 LL …     (DES, 8-bit uzunluk)
+    Windows  36 00LL …   (DES, 16-bit uzunluk, big-endian)
+Gövde ve iç sarmallar (`35 03 …`) DEĞİŞMİYOR. Beş gerçek kayıtta dönüşüm
+altınla **bayt bayt** aynı çıktı (58→59, 61→62, 99→100, 77→78 bayt).
+
+KAPSAM: yalnız 0x35 ile başlayan kayıt çevrilir; 0x36 ile başlayan zaten
+Windows biçimidir ve olduğu gibi geçer; başka bir şey (0x37 = 32-bit uzunluk,
+ya da SDP olmayan gövde) ÇEVRİLMEZ ve Dynamic'e YAZILMAZ — ölçülmemiş bir
+sarmal uydurmaktansa düğüm açılmaması yeğdir. Bu alan `CachedServices`in
+YERİNE değil YANINA yazılır: altın kayıtta ikisi de var."""
+
+
+def dynamic_record(record_hex):
+    """BlueZ SDP kaydını `DynamicCachedServices` biçimine çevir → `DYNAMIC_NOTU`.
+
+    Döner: hex dize, ya da çevrilemeyen şekilde `None`.
+    """
+    try:
+        raw = bytes.fromhex(record_hex)
+    except ValueError:
+        return None
+    if len(raw) < 2:
+        return None
+    if raw[0] == 0x36:
+        return record_hex.lower()
+    if raw[0] != 0x35 or raw[1] != len(raw) - 2:
+        return None
+    return (bytes([0x36]) + raw[1].to_bytes(2, "big") + raw[2:]).hex()
+
+
 def device_record_ops(adapter, dev, name, is_le, attrs, services, sdp_records=None,
                       le_flags=None, remote=None):
     """`Devices\\<mac>` + `ServicesFor<adaptör>` kaydını yazan işlemler.
@@ -623,6 +665,16 @@ def device_record_ops(adapter, dev, name, is_le, attrs, services, sdp_records=No
             ops.append((KEY, cached))
             for record_name, record_hex in sorted(sdp_records.items()):
                 ops.append((BIN, cached, record_name, record_hex))
+            # `DynamicCachedServices` — Windows'un servis DÜĞÜMLERİNİ açtığı
+            # liste (→ `DYNAMIC_NOTU`). Aynı kayıtlar, yalnız dış sarmal farklı.
+            dynamic = [(name, dynamic_record(record_hex))
+                       for name, record_hex in sorted(sdp_records.items())]
+            dynamic = [(name, rec) for name, rec in dynamic if rec]
+            if dynamic:
+                dyn_path = f"{dev_path}\\DynamicCachedServices"
+                ops.append((KEY, dyn_path))
+                for record_name, record_hex in dynamic:
+                    ops.append((BIN, dyn_path, record_name, record_hex))
         for uuid in services:
             uuid_path = f"{svc_path}\\{{{uuid}}}"
             leaf = f"{uuid_path}\\C00000000"
