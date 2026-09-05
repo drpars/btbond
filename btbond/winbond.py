@@ -628,11 +628,31 @@ değer; Windows 11 10.0.26100.8972, `bthleenum.inf`; iki LE cihaz):
     Xbox'ta 20:27:03–20:27:07, farede 20:47:15–20:47:18 (3–4 sn'lik pencere),
     ve ikisi de aracın o misafire bond yazmasından (09-04 00:20:48) ÖNCE.
 
-ÖLÇÜLMEDİ — ve tek açık kalan soru bu: Windows'un HİÇ görmediği bir LE cihazın
-bond'u replike edildiğinde, Windows bağlanıp ağacı kendisi kurar mı? Kurarsa
-replike edilecek bir şey yok; kurmazsa çare yine bir değer değil devnode
-sentezidir. `win11` bu kolu cevaplamıyor: oraya yalnız BR/EDR kulaklık bond'u
-yazılmış, LE bond'u hiç yok."""
+KALAN SORU DA ÖLÇÜLDÜ (2026-09-05 19:07, `win11`, uçtan uca): Windows'un HİÇ
+görmediği bir LE cihazın bond'u replike edilince Windows ağacı **kendisi
+kuruyor**. Yani replike edilecek bir şey yok — bu yazının yasakladığı devnode
+sentezi gerekli de değil.
+
+Kol temizdi: `win11`de `Enum\\BTHLE` **0**, `Enum\\BTHLEDevice` **0**, cihaz
+başına LE sürücü örneği yok. Xbox kolunun bond'u ajanla yazıldı, radyo
+devredildi (19:07:25), ve:
+
+  - cihaz düğümü 19:07:22, altı servis düğümü 19:07:29 → **~7 sn**;
+    handle kümesi BlueZ'in `2800` satırlarıyla yine **6/6**.
+  - `AttributeCache` yine BOŞ doğdu (`değer=1 alt=0`) — bu kez **26200**
+    build'inde, yani bulgu tek build'e ait değil.
+  - Cihaz yalnız numaralanmadı, **çalıştı**: `Bluetooth LE XINPUT compatible
+    input device` ve `HID-compliant game controller`, ikisi de Status=OK.
+    (Girdi olayı gözlenmedi — kimse ekranın başında değildi.)
+  - Bond BOZULMADI: LTK ve IRK iki tarafta **bayt bayt aynı**, yani cihaz
+    replike anahtarla bağlandı, yeniden eşleşmedi. Kol sonra host'a geri
+    bağlandı.
+  - KONTROL KOLU: farenin bond'u aynı turda birebir aynı şekilde yazıldı ama
+    fare KAPALIYDI ve onun için ağaç **doğmadı** (`BTHLE` 2 değil 1). Ağacı
+    doğuran şey bond yazımı değil BAĞLANTI.
+
+Yan bulgu: bu tur `LEFlags` **yazılmadan** koştu ve cihaz tam çalıştı — yani
+alanın yokluğu en azından bu cihazda bir şey bozmuyor."""
 
 
 def plain_record(record_hex):
