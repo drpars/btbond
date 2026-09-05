@@ -48,6 +48,20 @@ DEVICES = PARAMS + r"\Devices"
 AUTHREQ_DEFAULT = 45
 CENTRAL_IRK_STATUS_DEFAULT = 1
 
+# `CEntralIRKStatus`ün YAZILAN değeri KALICI DEĞİL — Windows onu bağlantıda
+# düzeltebiliyor, ve düzeltme zararsız çıktı. ÖLÇÜLDÜ (2026-09-05): araç
+# `win11`e **1** yazdı, kol bağlandı ve tam çalıştı, ama kayıt sonradan **0**
+# okundu; `win11-nvme`de (Windows'un kendi eşleştirmesi) aynı alan **1**.
+# Ayıran şeyin ADAPTÖRÜN KENDİSİ olduğu görünüyor: `win11`in adaptör düğümünde
+# `CentralIRK` **yok**, `win11-nvme`de **var** (16B). Yani bayrak "merkezin
+# IRK'i cihaza dağıtıldı" diyor ve dağıtacak IRK olmayan tarafta Windows onu
+# sıfırlıyor.
+#
+# HİPOTEZ, KANIT DEĞİL: korelasyon 2/2 ve mekanizma makul, ama `CentralIRK`
+# varken/yokken 1 yazıp sonucu karşılaştıran kontrollü bir kol koşturulmadı.
+# Bugünkü davranışı değiştirmiyor — 1 yazmak cihazı bozmadı, ve alan zaten
+# `irk_hex` yokken 0 yazılıyor (→ `toguest`).
+
 # `Devices\<mac>\ServicesFor<adaptör>` — ÖLÇÜLDÜ (2026-09-03, gerçek Windows
 # eşleştirmesinin öncesi/sonrası kayıt defteri karşılaştırılarak). Yalnız
 # `Keys` yazmak yetmiyor: Windows cihazı `paired` gösteriyor ve link key ile
@@ -102,8 +116,32 @@ LE_SERVICE_FLAGS = {
 # `--le-flags` ile verirse yazılır, (3) ikisi de yoksa **hiç yazılmaz** ve
 # bu raporlanır. Yokluğun neyi bozduğu da ölçülmedi — o yüzden sessiz
 # kalmıyor, söyleniyor.
-LEFLAGS_NOTU = ("LEFlags cihaza göre değişiyor ve n=2'de türetilemedi; "
-                "sabit yazmak yerine korunur/verilir/atlanır")
+LEFLAGS_NOTU = ("LEFlags cihazın değil KURULUMUN alanı — aynı cihaz iki "
+                "misafirde iki ayrı değer taşıyor; korunur/verilir/atlanır")
+
+# LEFLAGS — ÇERÇEVE 2026-09-05'te DEĞİŞTİ, ve eski çerçeve yanlıştı.
+#
+# Eskiden yazılı olan şey *"cihaza göre değişiyor, n=2'de türetilemedi"* idi,
+# yani ima "üçüncü bir cihaz bulunursa türetilir". Ölçüm bunu çürüttü: AYNI
+# Xbox kolu, AYNI host adaptörü, iki misafirde İKİ AYRI değer —
+#
+#     win11        458752      bit {16, 17, 18}   (bond'u ARAÇ yazdı,
+#                                                  değeri Windows bağlanınca
+#                                                  KENDİSİ koydu)
+#     win11-nvme   268632064   bit {16, 17, 28}   (Windows'un kendi eşleştirmesi)
+#
+# Üçüncü gözlem (ROG fare, `win11-nvme`) {16, 17, 19}. Ortak olan {16, 17};
+# değişen tek bit kuruluma göre oynuyor. Yani alan cihazın bir fonksiyonu
+# DEĞİL, ve türetmek "başka bir kurulumun değerini yazmak" olurdu.
+#
+# YOKLUĞUNUN ETKİSİ DE ÖLÇÜLDÜ (aynı tur): araç `win11`e LEFlags YAZMADAN
+# bond'u replike etti, kol bağlandı ve tam çalıştı (XINPUT + HID düğümleri
+# Status=OK) — eksik alanı Windows bağlantıda kendisi doldurdu. Yani bugünkü
+# politika (korunur > verilir > YAZILMAZ) ölçülmüş olarak doğru; en zayıf
+# dalı olan "hiç yazma" dalı uçtan uca koştu.
+#
+# ÖLÇÜLMEDİ: hedefte YANLIŞ bir değer dururken ne olduğu — üç gözlemin
+# hiçbirinde araç var olan bir LEFlags'in üstüne yazmadı.
 LEFLAGS_FIELD = "LEFlags"
 
 # Windows'un her iki teknolojide de yazdığı sabitler.
@@ -122,6 +160,14 @@ PRI_LANG_SERVICE_NAME_LEN = 256
 # adresinden **deterministik** üretiliyor, böylece aynı çift her koşuda aynı
 # GUID'i alır. GEREKLİ OLUP OLMADIĞI ÖLÇÜLMEDİ — `--no-container-id` ile
 # kapatılabilir.
+#
+# ÖLÇÜLDÜ (2026-09-05): Windows üretilen değeri KABUL EDİYOR ve üstüne
+# YAZMIYOR — `win11`e araçla yazılan `4bd73f18…`, kol bağlanıp tam bir
+# numaralandırma turu koştuktan sonra da bayt bayt aynı kaldı, ve cihaz çalıştı.
+# KAPSAM DAR: bu "değer doğru" demek değil. `win11-nvme`deki aynı GUID bağımsız
+# bir tanık DEĞİL — o kaydı da araç yazdı (09-04), yani iki taraf aynı
+# deterministik üretimin iki kopyası. Windows'un kendi ürettiği bir GUID'le
+# karşılaştırma hâlâ yok; gerekli olup olmadığı da hâlâ ölçülmedi.
 CONTAINER_NAMESPACE = uuid.UUID("6ba7b810-9dad-11d1-80b4-00c04fd430c8")  # DNS ns
 
 
