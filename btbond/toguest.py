@@ -261,6 +261,16 @@ def plan(root, adapter, bonds, guest, only, order, authreq, force, container=Tru
                 report.append(f"           [{', '.join(f'{k}={v}' for k, v in shown.items())}]")
                 report.append(f"           {flags_note}")
                 report.append("           " + describe_remote(remote, is_le=True))
+                # BR/EDR dalı eksik SDP'yi uyarıyor; LE'de karşılığı YOK ve bu
+                # bir eksik değil — Windows'ta servis önbelleği bir değer değil
+                # PnP düğüm ağacı → `winbond.LE_SERVIS_NOTU`. Satır, iki dalı
+                # yan yana okuyanın soruyu yeniden türetmemesi için duruyor.
+                gatt = bluezbond.attributes(root, adapter, dev)
+                birincil = bluezbond.primary_services(root, adapter, dev)
+                report.append(f"           servis önbelleği YAZILMIYOR: BlueZ'de "
+                              f"{len(gatt)} GATT satırı ({len(birincil)} birincil "
+                              f"servis), Windows'ta karşılığı değer değil devnode "
+                              f"ağacı (ölçüldü 2026-09-05)")
 
         if not link_key and not ltk:
             report.append(f"  ATLANDI {dev}  \"{name}\"  — anahtar bölümü yok "

@@ -265,5 +265,67 @@ with tempfile.TemporaryDirectory() as tmp:
 check("okunamayan mounts dosyası boş liste",
       sidemount.locate_mounted_windows("/yok/boyle/bir/dosya"), [])
 
+print("\n=== bluezbond.attributes / primary_services (LE katmanı) ===")
+# ÖLÇÜLDÜ (2026-09-05): handle düzeni gerçek bir LE kolun tablosundan alındı —
+# altı birincil servis 0001/0008/0009/0012/0016/0024'te, aralarında
+# karakteristik (`2803`) ve betimleyici satırları. Windows'un devnode kümesi
+# tam bu ALTI handle'dı (6/6) → `winbond.LE_SERVIS_NOTU`. Vendor UUID'si
+# yer tutucu; MAC zaten uydurma.
+SIG = "-0000-1000-8000-00805f9b34fb"
+with tempfile.TemporaryDirectory() as tmp:
+    root = Path(tmp)
+    cache_dir = root / ADAPTER / "cache"
+    cache_dir.mkdir(parents=True)
+    (cache_dir / DEV).write_text(
+        "[Attributes]\n"
+        f"0001=2800:0007:00001800{SIG}\n"
+        f"0002=2803:0003:02:00002a00{SIG}\n"
+        f"0004=2803:0005:02:00002a01{SIG}\n"
+        f"0008=2800:0008:00001801{SIG}\n"
+        f"0009=2800:0011:0000180a{SIG}\n"
+        f"0012=2800:0015:0000180f{SIG}\n"
+        f"0013=2803:0014:12:00002a19{SIG}\n"
+        f"0015=00002902{SIG}\n"
+        f"0016=2800:0023:00001812{SIG}\n"
+        f"0024=2800:002A:00000001-5F60-4C4F-9C83-A79532980000\n",
+        encoding="utf-8")
+
+    attrs = bluezbond.attributes(root, ADAPTER, DEV)
+    check("bütün satırlar okundu", len(attrs), 10)
+    check("handle küçük harf anahtar", "0001" in attrs, True)
+    check("satır ham geliyor", attrs["0002"], f"2803:0003:02:00002a00{SIG}")
+    check("büyük harf satır küçültüldü", attrs["0024"],
+          "2800:002a:00000001-5f60-4c4f-9c83-a79532980000")
+
+    birincil = bluezbond.primary_services(root, ADAPTER, DEV)
+    check("YALNIZ 2800 satırları", sorted(birincil),
+          ["0001", "0008", "0009", "0012", "0016", "0024"])
+    check("Windows'un devnode kümesiyle aynı sayı", len(birincil), 6)
+    check("uuid çözüldü", birincil["0009"], f"0000180a{SIG}")
+    check("vendor uuid çözüldü", birincil["0024"],
+          "00000001-5f60-4c4f-9c83-a79532980000")
+    check("karakteristik girmedi", "0002" in birincil, False)
+    check("betimleyici girmedi", "0015" in birincil, False)
+
+    # Bölümü olmayan dosya: yazıcının `cache/`i böyle (yalnız `[General]`).
+    yalniz_ad = "11:22:33:44:55:66"
+    (cache_dir / yalniz_ad).write_text("[General]\nName=Yazıcı\n", encoding="utf-8")
+    check("[Attributes] yoksa boş",
+          bluezbond.attributes(root, ADAPTER, yalniz_ad), {})
+    check("bölüm yoksa birincil de boş",
+          bluezbond.primary_services(root, ADAPTER, yalniz_ad), {})
+    check("dosya yoksa boş",
+          bluezbond.attributes(root, ADAPTER, "99:99:99:99:99:99"), {})
+
+    # Ortak okuyucuya geçişin regresyonu: `0x` soyma YALNIZ ServiceRecords'ta.
+    (cache_dir / DEV).write_text(
+        "[Attributes]\n0x11=2800:0012:0000180f" + SIG + "\n\n"
+        "[ServiceRecords]\n" f"0x00010000={des8(body(8)).upper()}\n",
+        encoding="utf-8")
+    check("ServiceRecords adı 0x'siz",
+          sorted(bluezbond.service_records(root, ADAPTER, DEV)), ["00010000"])
+    check("Attributes handle'ı SOYULMUYOR",
+          sorted(bluezbond.attributes(root, ADAPTER, DEV)), ["0x11"])
+
 print(f"\nSONUÇ: {OK} geçti / {FAIL} başarısız")
 sys.exit(1 if FAIL else 0)

@@ -592,6 +592,49 @@ sarmal uydurmaktansa düğüm açılmaması yeğdir. Bu alan `CachedServices`in
 YERİNE değil YANINA yazılır: altın kayıtta ikisi de var."""
 
 
+LE_SERVIS_NOTU = """LE'nin servis önbelleği REPLİKE EDİLMİYOR — ve sebebi bir eksik değil.
+
+BR/EDR'de karşılık bir DEĞERDİ (`CachedServices`/`DynamicCachedServices`), o
+yüzden yazılabiliyordu. LE'de Windows'un karşılığı bir değer değil **PnP düğüm
+ağacı**: keşfedilen her birincil servis için üç ayrı yerde kayıt açılıyor —
+
+    Enum\\BTHLEDevice\\{<servis-uuid>}_Dev_VID&…_PID&…_REV&…_<mac>
+                      \\<ParentIdPrefix>&<başlangıç-handle>
+    Control\\Class\\{e0cbf06c-cd8b-4647-bb8a-263b43f0f974}\\<NNNN>   (sürücü örneği)
+    Control\\DeviceClasses\\{<servis-uuid>}\\##?#BTHLEDevice#…        (arayüz)
+
+artı düğüm başına DEVPKEY `Properties` alt ağacı. Yani `→ misafir` yönü bir
+değer yazmak değil **devnode uydurmak** olurdu; bu dosyanın kendi ölçütü onu
+zaten reddediyor (→ `DYNAMIC_NOTU`: "ölçülmemiş bir sarmal uydurmaktansa düğüm
+açılmaması yeğdir").
+
+ÖLÇÜLDÜ (2026-09-05, `win11-nvme` kovanının TAMAMI: 37.448 düğüm / 87.558
+değer; Windows 11 10.0.26100.8972, `bthleenum.inf`; iki LE cihaz):
+
+  - `AttributeCache` (sürücü örneği altında) VAR ama BOŞ — 2 bayt, tek adsız
+    `String`, alt düğüm yok. Cihaz düğümüyle AYNI saniyede doğmuş ve bir daha
+    yazılmamış. Yani bu yapı GATT tablosunu SAKLAMIYOR.
+  - Düğüm kümesi ile BlueZ `cache/<mac>` `[Attributes]`ın `2800` (birincil
+    servis) satırları **13/13** örtüşüyor, hem handle hem UUID: Xbox 6/6
+    (0001/1800, 0008/1801, 0009/180a, 0012/180f, 0016/1812, 0024/vendor),
+    fare 7/7. Instance ID'nin son dört hex hanesi servisin BAŞLANGIÇ
+    handle'ıdır.
+  - KATMAN ASİMETRİK, ve `→ host` yönünü bu kapatıyor: BlueZ servis +
+    karakteristik + betimleyici tutuyor (Xbox 26 satır = 6+16+4, fare 55 =
+    7+31+17), Windows yalnız servis katmanını (6 ve 7 düğüm). Yani Windows'ta
+    BlueZ'in ihtiyacı olan satırların %23'ü ve %13'ü var — kalanı orada HİÇ
+    yok, türetilemez de.
+  - Ağacı Windows CANLI KEŞİFLE kuruyor: cihaz düğümü + altı servis düğümü
+    Xbox'ta 20:27:03–20:27:07, farede 20:47:15–20:47:18 (3–4 sn'lik pencere),
+    ve ikisi de aracın o misafire bond yazmasından (09-04 00:20:48) ÖNCE.
+
+ÖLÇÜLMEDİ — ve tek açık kalan soru bu: Windows'un HİÇ görmediği bir LE cihazın
+bond'u replike edildiğinde, Windows bağlanıp ağacı kendisi kurar mı? Kurarsa
+replike edilecek bir şey yok; kurmazsa çare yine bir değer değil devnode
+sentezidir. `win11` bu kolu cevaplamıyor: oraya yalnız BR/EDR kulaklık bond'u
+yazılmış, LE bond'u hiç yok."""
+
+
 def plain_record(record_hex):
     """`dynamic_record`ün TERSİ: Windows kaydını BlueZ biçimine çevir.
 

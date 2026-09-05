@@ -134,16 +134,13 @@ def section_key(info, section):
     return info[section].get("Key")
 
 
-def service_records(root, adapter, dev):
-    """Cihazın ham SDP kayıtlarını `cache/<mac>` dosyasından ver.
+def _cache_section(root, adapter, dev, section):
+    """`cache/<mac>` dosyasının bir bölümünü {anahtar: değer} ver, ikisi de küçük harf.
 
-    ÖLÇÜLDÜ (2026-09-03): BlueZ bu kayıtları `[ServiceRecords]` altında
-    `0x00010000=3538…` biçiminde saklıyor ve baytlar Windows'un
-    `Devices\\<mac>\\CachedServices` değerleriyle **birebir aynı** — aynı SDP
-    veri elemanı dizisi, aynı 1 baytlık uzunluk başlığı. Yani Windows tarafı
-    bu bloktan doğrudan yazılabiliyor, yeniden üretmek gerekmiyor.
-
-    Döner: {"00010000": "<hex>", …} (Windows'un değer adı biçiminde).
+    İki çağıranı var (`[ServiceRecords]` ve `[Attributes]`) ve ikisi de aynı
+    dosyayı aynı biçimde okuyor; ayrı yazılsaydı biri ilerler, öbürü donardı.
+    Bölüm yoksa ya da dosya yoksa BOŞ döner — cihazın önbelleği hiç olmayabilir
+    (ölçüldü: yazıcının `cache/` dosyasında yalnız `[General] Name` var).
     """
     path = Path(root) / adapter / "cache" / dev
     parser = _parser()
@@ -154,13 +151,64 @@ def service_records(root, adapter, dev):
         return {}
     except PermissionError:
         sys.exit(f"{path} okunamadı — `sudo` ile çalıştırın")
-    if not parser.has_section("ServiceRecords"):
+    if not parser.has_section(section):
         return {}
-    records = {}
-    for name, value in parser["ServiceRecords"].items():
-        key = name[2:] if name.lower().startswith("0x") else name
-        records[key] = value.strip().lower()
-    return records
+    return {name.lower(): value.strip().lower()
+            for name, value in parser[section].items()}
+
+
+def attributes(root, adapter, dev):
+    """Cihazın GATT öznitelik tablosunu `cache/<mac>` `[Attributes]`tan ver.
+
+    `[ServiceRecords]`in LE karşılığı. Biçim BlueZ'in `doc/settings-storage.txt`
+    belgesinde yazılı ve bu makinede doğrulandı (2026-09-05, iki LE cihaz):
+
+        <handle>=2800:<son-handle>:<uuid>          birincil servis
+        <handle>=2803:<değer-handle>:<özellik>:<uuid>   karakteristik
+        <handle>=<uuid>                            betimleyici
+
+    Döner: {"0001": "2800:0007:00001800-…", …} — ham satır, ayrıştırılmamış.
+    Ayrıştırmayı `primary_services` yapıyor; kalan iki tür bugün OKUNMUYOR,
+    çünkü yazılacak bir yerleri yok → `winbond.LE_SERVIS_NOTU`.
+    """
+    return _cache_section(root, adapter, dev, "Attributes")
+
+
+def primary_services(root, adapter, dev):
+    """`[Attributes]`in yalnız `2800` satırlarını çöz: {handle: uuid}.
+
+    NİÇİN BU KATMAN: Windows'un LE tarafında tuttuğu TEK katman bu — her
+    birincil servis için bir PnP devnode, ve instance ID'nin son dört hex
+    hanesi tam olarak buradaki handle. Örtüşme bu makinede 13/13 ölçüldü
+    (Xbox 6/6, ROG fare 7/7) → `winbond.LE_SERVIS_NOTU`.
+
+    Handle KÜÇÜK HARF hex, dosyadaki yazımıyla; UUID de öyle.
+    """
+    services = {}
+    for handle, satir in attributes(root, adapter, dev).items():
+        parcalar = satir.split(":")
+        if len(parcalar) == 3 and parcalar[0] == "2800":
+            services[handle.lower()] = parcalar[2].lower()
+    return services
+
+
+def service_records(root, adapter, dev):
+    """Cihazın ham SDP kayıtlarını `cache/<mac>` dosyasından ver.
+
+    ÖLÇÜLDÜ (2026-09-03): BlueZ bu kayıtları `[ServiceRecords]` altında
+    `0x00010000=3538…` biçiminde saklıyor ve baytlar Windows'un
+    `Devices\\<mac>\\CachedServices` değerleriyle **birebir aynı** — aynı SDP
+    veri elemanı dizisi, aynı 1 baytlık uzunluk başlığı. Yani Windows tarafı
+    bu bloktan doğrudan yazılabiliyor, yeniden üretmek gerekmiyor.
+
+    Döner: {"00010000": "<hex>", …} (Windows'un değer adı biçiminde).
+
+    `0x` önekinin soyulması BU bölüme özel — değer ADI Windows tarafında
+    öneksiz duruyor. `[Attributes]`in handle'ları zaten öneksiz.
+    """
+    return {(name[2:] if name.startswith("0x") else name): value
+            for name, value in
+            _cache_section(root, adapter, dev, "ServiceRecords").items()}
 
 
 def write_service_records(root, adapter, dev, records, force=False, dry_run=False,
