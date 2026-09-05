@@ -328,7 +328,17 @@ class BtbondTui(App):
         scrollbar-background: $surface; scrollbar-color: $panel-lighten-2;
         scrollbar-color-hover: $accent; scrollbar-color-active: $accent;
     }
-    DataTable > .datatable--header { text-style: bold; }
+    DataTable > .datatable--header { text-style: bold; background: $panel; }
+
+    /* SATIR İMLECİ YARI SAYDAM, ve bu kozmetik DEĞİL: varsayılan imleç dolu
+       bir `$primary` bloğu ve hücrenin kendi rengini EZİYOR — seçili satırda
+       `ANAHTAR FARKLI`nın kırmızısı, `eşleşiyor`un sönüğü kayboluyordu, yani
+       hükmü renkle taşıma sözleşmesi tam da göz oraya gittiğinde düşüyordu
+       (kullanıcının gerçek terminal ss'lerinde görüldü, 2026-09-05).
+       Renk VERİLMİYOR: verilirse hücre stilini yine ezerdi. Zemin tonu işi
+       yapıyor, `bold` da imleci saydamlığa rağmen okunur tutuyor. */
+    DataTable > .datatable--cursor { background: $primary 50%; text-style: bold; }
+    DataTable > .datatable--hover { background: $boost; }
 
     /* Günlük başlıklı bir çerçevede: başlıksız hâlinde tablonun devamı gibi
        okunuyordu, oysa içeriği ayrı — koşan komutlar ve çıktıları. */
@@ -357,7 +367,38 @@ class BtbondTui(App):
         background: $boost; color: $text-muted;
     }
     Horizontal { height: auto; align: center middle; }
-    Button { margin: 0 1; }
+
+    /* DÜĞMELER — ölçüt "güzel" değil, ODAK GÜÇLENDİRMELİ.
+       Textual'ın varsayılanı `Button:focus`a `text-style: bold reverse`
+       veriyor; `reverse` yıkıcı düğmeyi SOLDURUYOR — odaklı kırmızı düğme,
+       odaksızından daha DÜŞÜK kontrastla (koyu kırmızı metin açık pembe
+       üstünde) çiziliyordu, yani odak görsel ağırlığı tersine çeviriyordu.
+       Kullanıcının iki ss'i yan yana konunca görüldü (2026-09-05, gerçek
+       terminal + başsız SVG'de birebir tekrarlandı).
+       Çare `reverse`ü düşürüp odağı ÇERÇEVEYE taşımak: dolgu rengi (yani
+       "bu düğme yıkıcı" bilgisi) yerinde kalıyor, odak ayrı bir kanaldan
+       geliyor. */
+    Button { margin: 0 1; min-width: 16; }
+    Button:focus {
+        text-style: bold;
+        border-top: tall $accent; border-bottom: tall $accent;
+    }
+
+    /* VAZGEÇ hep düğme gibi görünür. Varsayılanda odaksızken yalnız havada
+       duran bir metindi (ikinci ss), odaktayken gri bir slab (birinci ss) —
+       yani en güvenli yol, görünürlüğü en oynak olanıydı. Sessiz ama var:
+       çerçevesi duruyor, dolgusu yok. */
+    #cancel {
+        background: transparent; color: $text-muted;
+        border-top: tall $panel-lighten-2; border-bottom: tall $panel-lighten-2;
+    }
+    /* Çerçeve BURADA da yazılıyor, çünkü `#cancel` (id) özgüllükte
+       `Button:focus`u yeniyor — yazılmazsa en sık odaklanan düğme (AUTO_FOCUS)
+       tek başına odak çerçevesiz kalırdı. */
+    #cancel:focus {
+        color: $text; text-style: bold;
+        border-top: tall $accent; border-bottom: tall $accent;
+    }
     """
 
     BINDINGS = [
@@ -402,7 +443,16 @@ class BtbondTui(App):
         yield Header(show_clock=True)
         yield Static("ölçülüyor…", id="band")
         yield Static("", id="stale")
-        table = DataTable(id="rows", cursor_type="row", zebra_stripes=True)
+        # `cursor_foreground_priority="renderable"` ZORUNLU, ve sebebi
+        # sözleşme: varsayılan `"css"`te imlecin rengi hücrenin stilinden
+        # SONRA uygulanıyor (Textual 8.2.8, `_get_styles_to_render_cell` →
+        # `post_foreground`), yani seçili satırda hükmün rengi eziliyordu —
+        # `ANAHTAR FARKLI` kırmızı değil beyaz çiziliyordu. Renk hükmü taşıyan
+        # bir kanal (→ `VERDICT_STYLE`), ve tam da göz oraya gittiğinde
+        # düşmesi en kötü yerde düşmesiydi. Zemin `"css"` KALIYOR: imlecin
+        # görünmesi ondan geliyor.
+        table = DataTable(id="rows", cursor_type="row", zebra_stripes=True,
+                          cursor_foreground_priority="renderable")
         # "tür" iki şey taşıyor ve ikisi de bir tür: bond satırında teknoloji
         # (LE / BR/EDR), taraf satırında diskin cinsi (image / partition).
         table.add_columns("taraf", "cihaz", "tür", "hüküm", "yön", "ad")

@@ -512,6 +512,26 @@ async def t_verdict_colours():
         check("yön oku hükmün rengini paylaşıyor",
               style_of(table.get_row_at(1)[4]), styles[1])
 
+        # İMLEÇ HÜKMÜN RENGİNİ EZMİYOR. Yukarıdaki dört iddia hücrenin
+        # MODELDEKİ stilini ölçüyor; imleç ise ÇİZİMDE devreye giriyor, yani
+        # dördü de geçerken seçili satırın rengi yine de kaybolabilir — ve
+        # kayboluyordu (2026-09-05, kullanıcının gerçek terminal ss'i:
+        # `ANAHTAR FARKLI` seçiliyken kırmızı değil beyazdı).
+        # Mekanizma: `cursor_foreground_priority` varsayılanı `"css"` ve o
+        # durumda imlecin rengi hücre stilinden SONRA uygulanıyor (Textual
+        # 8.2.8, `_get_styles_to_render_cell` → `post_foreground`).
+        # Ölçülen şey ayar, çizilen piksel değil — ama sözleşmeyi taşıyan
+        # tek yer bu ayar.
+        check("imleç ön rengi hücreye bırakıyor",
+              table.cursor_foreground_priority, "renderable")
+        # Zemin AYARI değişmedi (varsayılan zaten `"renderable"`), ve imlecin
+        # görünmesi ondan gelmiyor: bileşen stili ÖN stil olarak da uygulanıyor
+        # (`pre_style = base_style + component_style`), hücreler kendi zeminini
+        # vermediği için imlecin zemini ayakta kalıyor. Ayar burada yalnız
+        # "dokunulmadı" diye bağlanıyor.
+        check("imleç zemin ayarı varsayılanda bırakıldı",
+              table.cursor_background_priority, "renderable")
+
         # AYRIŞMA hükmün PARÇASI değil, üstüne binen ayrı bir uyarı — metinde
         # de renkte de ayrı durmalı.
         cross = table.get_row_at(3)[3]
