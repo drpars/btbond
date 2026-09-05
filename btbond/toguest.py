@@ -26,8 +26,8 @@ misafirdeyken yazmak ölçülmedi: Windows çalışan yığını bellekten geri
 yazabilir.
 
 TÜRETİLMİŞ (ölçülmedi) — LE bond'unun `Address` QWORD alanı. Değer, cihazın
-BD_ADDR'inin 48-bit tamsayı okunuşu olarak yazılıyor (`0C:35:26:73:33:63` →
-`0x0C3526733363`), yani Windows'un `BTH_ADDR` sözleşmesi ve alt anahtar adının
+BD_ADDR'inin 48-bit tamsayı okunuşu olarak yazılıyor (`AA:BB:CC:DD:EE:FF` →
+`0xAABBCCDDEEFF`), yani Windows'un `BTH_ADDR` sözleşmesi ve alt anahtar adının
 sırası. Doğruluğu ancak bağlantının kurulmasından okunur.
 
 `AuthReq` ve `CEntralIRKStatus` de BlueZ'de karşılığı olmayan alanlar: Windows
@@ -39,7 +39,7 @@ GİZLİLİK: anahtar baytları stdout'a **basılmaz**; ekrana yalnız parmak izi
 Kullanım:
     sudo btbond to-guest --dry-run            # ne yazılacak
     sudo btbond to-guest                      # misafire yaz
-    sudo btbond to-guest --only E8:07:BF:A0:55:B4 --force
+    sudo btbond to-guest --only <mac> --force
     sudo btbond to-guest --remove --only <mac> # bond'u misafirden sil
     sudo btbond to-guest --offline /mnt/win     # kapalı misafir / dual boot
 """
@@ -328,6 +328,14 @@ def main():
     parser.add_argument("--offline", metavar="MOUNT",
                         help="ajan yerine offline kovana yaz: verilen mount kökü "
                              "(ya da doğrudan SYSTEM kovanı). Misafir KAPALI olmalı.")
+    # Yedek YALNIZ offline yolda anlamlı: ajan yolunda tek tek değerler
+    # yazılıyor, dosya yerinde yeniden yazılmıyor → `hivebond.backup_hive`.
+    parser.add_argument("--backup-dir", metavar="DIZIN",
+                        default=hivebond.BACKUP_DIR,
+                        help=f"offline yazımdan önce kovanın kopyası buraya "
+                             f"alınır (varsayılan: {hivebond.BACKUP_DIR})")
+    parser.add_argument("--no-backup", action="store_true",
+                        help="offline yazımda kovan yedeği ALMA — geri dönüş yok")
     args = parser.parse_args()
     if not args.offline:
         args.domain, why = agentexec.single_domain(args.domain, "bluez-to-win")
@@ -407,12 +415,19 @@ def main():
         # offline'da o sınır yok, ve tek commit yarım kalmış bir kaydı da
         # imkânsız kılıyor.
         flat = [op for chunk in chunks for op in chunk]
-        marks, meta = hivebond.apply_ops(args.offline, flat, dry_run=False)
+        marks, meta = hivebond.apply_ops(
+            args.offline, flat, dry_run=False,
+            backup_dir=None if args.no_backup else args.backup_dir)
         for mark in marks:
             print(f"  {mark}")
         print(f"\n{len(marks)} bond işlemi offline kovana yazıldı "
               f"({meta['ops']} işlem, tek commit).")
         print(f"  kapı: {meta['gate']}")
+        if meta["backup"]:
+            print(f"  yedek: {meta['backup']}  (kovanın TAMAMI — sır taşır, "
+                  f"işiniz bitince silin)")
+        else:
+            print("  yedek: ALINMADI (--no-backup) — geri dönüş yok")
         if not args.remove:
             print("Windows bunları BTHPORT sürücüsü başlarken okur — misafir "
                   "açıldığında (ya da radyo o tarafa verildiğinde) okunacak.")

@@ -227,7 +227,7 @@ function Set-Zeros($p, $n, $len) {
 
 
 def mac_from_hex12(text):
-    """`c88a9a004717` → `C8:8A:9A:00:47:17`; değilse None."""
+    """`aabbccddeeff` → `AA:BB:CC:DD:EE:FF`; değilse None."""
     text = text.strip()
     if len(text) != 12:
         return None
@@ -239,7 +239,7 @@ def mac_from_hex12(text):
 
 
 def hex12(mac):
-    """`C8:8A:9A:00:47:17` → `c88a9a004717` (kayıt defteri anahtar adı biçimi)."""
+    """`AA:BB:CC:DD:EE:FF` → `aabbccddeeff` (kayıt defteri anahtar adı biçimi)."""
     return mac.replace(":", "").lower()
 
 
@@ -590,6 +590,107 @@ Windows biçimidir ve olduğu gibi geçer; başka bir şey (0x37 = 32-bit uzunlu
 ya da SDP olmayan gövde) ÇEVRİLMEZ ve Dynamic'e YAZILMAZ — ölçülmemiş bir
 sarmal uydurmaktansa düğüm açılmaması yeğdir. Bu alan `CachedServices`in
 YERİNE değil YANINA yazılır: altın kayıtta ikisi de var."""
+
+
+def plain_record(record_hex):
+    """`dynamic_record`ün TERSİ: Windows kaydını BlueZ biçimine çevir.
+
+    BlueZ `cache/<mac>` `[ServiceRecords]` 8-bit uzunluklu dış sarmalı
+    (`35 LL …`) kullanıyor; Windows `DynamicCachedServices` 16-bit'i
+    (`36 00LL …`). Gövde aynı → `DYNAMIC_NOTU`.
+
+    ÖLÇÜLDÜ (2026-09-05, misafirin kovanı ↔ host `cache/<mac>`, BR/EDR kulaklık):
+    aynı cihazın beş kaydı iki tarafta da duruyor ve `CachedServices` baytları
+    BlueZ'inkiyle **birebir aynı**; `DynamicCachedServices` yalnız sarmalda
+    ayrılıyor (58↔59, 61↔62, 99↔100, 77↔78 bayt).
+
+    KAPSAM ileri yönün aynası: yalnız `36 00LL` çevrilir, `35` olduğu gibi
+    geçer, 16-bit uzunluk baytı gerçekten gövdeyi tarif etmiyorsa (ya da başka
+    bir sarmal — `37`, SDP olmayan gövde) `None` döner ve kayıt YAZILMAZ.
+    Ölçülmemiş bir sarmalı BlueZ'in önbelleğine sokmaktansa kayıt olmaması
+    yeğdir: BlueZ o zaman SDP'yi yeniden sorar.
+
+    Döner: hex dize (küçük harf), ya da çevrilemeyen şekilde `None`.
+    """
+    try:
+        raw = bytes.fromhex(record_hex)
+    except ValueError:
+        return None
+    if len(raw) < 2:
+        return None
+    if raw[0] == 0x35:
+        return record_hex.lower() if raw[1] == len(raw) - 2 else None
+    if raw[0] != 0x36 or len(raw) < 3:
+        return None
+    if int.from_bytes(raw[1:3], "big") != len(raw) - 3:
+        return None
+    body = raw[3:]
+    if len(body) > 0xFF:
+        # 8-bit sarmala sığmıyor: BlueZ biçimine çevrilemez.
+        return None
+    return (bytes([0x35, len(body)]) + body).hex()
+
+
+def _is_handle(name):
+    """`CachedServices` değer adı 8 haneli hex bir SDP handle'ıdır (`00010000`).
+
+    ÖLÇÜLDÜ (2026-09-05): beş kaydın beşi `00010000`…`00010004`. Süzgeç var
+    çünkü aynı düğüme başka bir ad eklenirse SDP gövdesi sanılmasın.
+    """
+    if len(name) != 8:
+        return False
+    try:
+        int(name, 16)
+    except ValueError:
+        return False
+    return True
+
+
+def cached_service_records(tree):
+    """Ölçülen ağaçtan cihaz başına SDP kayıtlarını çıkar.
+
+    `collect` bunları düşürüyordu — ileri yönde gerek yoktu, çünkü kayıtların
+    kaynağı host'un kendi `cache/`i. Ters yön (misafirde eşleştirilmiş bir
+    cihazı host'a getirmek) onları host'ta HİÇ bulamıyor: `to-guest` o durumda
+    *"BlueZ cache'inde SDP kaydı yok"* uyarısını basıyordu, yani boşluk zaten
+    ölçülüydü.
+
+    `CachedServices` önceliklidir çünkü BlueZ biçiminde (`35 LL`) duruyor;
+    yoksa `DynamicCachedServices` `plain_record` ile çevrilir.
+
+    Döner: {cihaz-mac: {"00010000": "<hex>", …}} — BlueZ'in beklediği gövde.
+    """
+    # İki kova ayrı toplanır: `tree` bir sözlük ve hangi düğümün önce
+    # görüleceği garanti değil — önceliği sıraya bağlamak sessizce dönerdi.
+    cached, dynamic = {}, {}
+    for path, values in tree.items():
+        parts = split_path(path)
+        if len(parts) != 3 or parts[0] != "Devices":
+            continue
+        node = parts[2].lower()
+        if node == "cachedservices":
+            bucket = cached
+        elif node == "dynamiccachedservices":
+            bucket = dynamic
+        else:
+            continue
+        mac = mac_from_hex12(parts[1])
+        if not mac:
+            continue
+        for name, (kind, value) in values.items():
+            if kind != "Binary" or not _is_handle(name):
+                continue
+            converted = plain_record(value)
+            if converted:
+                bucket.setdefault(mac, {})[name.lower()] = converted
+
+    records = {}
+    for mac in set(cached) | set(dynamic):
+        merged = dict(dynamic.get(mac, {}))
+        merged.update(cached.get(mac, {}))       # `CachedServices` önceliklidir
+        if merged:
+            records[mac] = merged
+    return records
 
 
 def dynamic_record(record_hex):

@@ -130,6 +130,11 @@ def main():
                         help="yazmadan önce `bluetoothd`yi durdur, sonra başlat "
                              "(radyo host'tayken devirsiz yazım; host BT "
                              "bağlantıları birkaç saniye düşer)")
+    # Varsayılan AÇIK: önbellek bond değil, eksikse BlueZ SDP'yi yeniden sorar,
+    # ama misafirde eşleştirilmiş bir cihaz host'a geldiğinde kayıt hiç olmuyor
+    # ve ters yön onu arıyor → `bluezbond.write_service_records`.
+    parser.add_argument("--no-service-cache", action="store_true",
+                        help="misafirin SDP kayıtlarını host `cache/`ine YAZMA")
     args = parser.parse_args()
     if not args.offline:
         args.domain, why = agentexec.single_domain(args.domain, "win-to-bluez")
@@ -138,12 +143,16 @@ def main():
 
     if args.offline:
         adapters, names, devices, _svc, meta = hivebond.read_bonds(args.offline)
+        sdp = meta["sdp"]
         print(f"offline kovan {meta['hive']}  ({meta['control_set']})")
     else:
         exitcode, stdout, stderr = run_powershell(args.domain, winbond.DUMP_POWERSHELL)
         if exitcode != 0:
             sys.exit(f"misafir komutu exitcode={exitcode}\n{stderr}")
-        adapters, names, devices, _svc = winbond.collect(winbond.parse_dump(stdout))
+        tree = winbond.parse_dump(stdout)
+        adapters, names, devices, _svc = winbond.collect(tree)
+        sdp = winbond.cached_service_records(tree)
+    args.sdp = {} if args.no_service_cache else sdp
     if not adapters:
         sys.exit("misafirde hiç bond yok (Keys altında adaptör anahtarı bulunamadı)")
 
@@ -269,14 +278,34 @@ def replicate(adapters, names, devices, args, only):
                 print("           ÇİFT KİPLİ: `[LinkKey]` ve LE bölümleri "
                       "aynı dosyaya birlikte yazılıyor")
 
+            existing = bluezbond.read_info(args.root, adapter, dev)
+            for section in bluezbond.stale_role_ltk(existing):
+                # Sessiz düşürme bu deponun ödenmiş hatası — bölüm gidiyorsa
+                # bunu okuyan bilsin → `bluezbond.ROLE_LTK_SECTIONS`.
+                print(f"           UYARI: `[{section}]` bölümü var ve bu yazımda "
+                      f"DÜŞÜYOR. Cihaz yeniden bağlanmayı kendi başlatıyorsa "
+                      f"bayat bir rol anahtarı şifrelemeyi bozabilir; bölümün "
+                      f"düşmesi bayat kalmasından güvenli, ama bu makinede "
+                      f"ÖLÇÜLMEDİ.")
             content = bluezbond.merge_preserved(
-                bluezbond.read_info(args.root, adapter, dev),
+                existing,
                 bluezbond.bond_info(name, args.key_order,
                                     link_key=link_key,
                                     key_type=args.link_key_type,
                                     le_bond=bond,
                                     authenticated=args.authenticated,
                                     addr_type_code=addr_code))
-            written += bluezbond.write_info(args.root, adapter, dev, content,
-                                            args.force, args.dry_run)
+            ok = bluezbond.write_info(args.root, adapter, dev, content,
+                                      args.force, args.dry_run)
+            written += ok
+            # SDP önbelleği yalnız `info` gerçekten yazıldıysa tazelenir:
+            # atlanmış bir bond'un yanına taze önbellek koymak iki kaydı
+            # ayrıştırır.
+            records = args.sdp.get(dev)
+            if ok and records:
+                stats = bluezbond.write_service_records(
+                    args.root, adapter, dev, records, args.force, args.dry_run)
+                if stats["blocked"]:
+                    print(f"           {stats['blocked']} SDP kaydı FARKLI ve "
+                          f"korundu (`--force` ile değiştirilir)")
     return written

@@ -385,6 +385,21 @@ bluetoothctl connect <cihaz-mac>                # asıl sınama
 Var olan bir `info` dosyası **üzerine yazılmaz**; `--force` verilirse önce
 `info.bak-<zaman>` olarak yedeklenir. `--only <mac>` tek cihazı seçer.
 
+**SDP önbelleği de taşınır** (varsayılan açık, `--no-service-cache` kapatır).
+Misafirde eşleştirilmiş bir cihaz host'a geldiğinde host'ta SDP kaydı hiç
+olmuyordu — ters yön onu arayıp bulamıyordu. Windows'un `CachedServices` /
+`DynamicCachedServices` kayıtları artık `cache/<mac>` dosyasının
+`[ServiceRecords]` bölümüne yazılıyor. Önbellek bond DEĞİL — eksikse BlueZ
+SDP'yi yeniden sorar —, o yüzden kural üç dallı: olmayan handle **eklenir**,
+aynısı duruyorsa **dokunulmaz** (dosya hiç açılmaz), farklı bir değer duruyorsa
+yalnız `--force` ile değişir. Başka bölümler (`[General]`, `[Endpoints]`,
+`[Attributes]`) ve listede olmayan handle'lar korunur; silme yok. Yazım atomik,
+var olan dosya `<mac>.bak-<zaman>` olarak yedeklenir.
+
+> ÖLÇÜLDÜ (2026-09-05): gerçek misafir kovanından okunan beş kayıt geçici bir
+> köke yazıldı ve BlueZ'in **kendi** ürettiği `cache/` dosyasıyla **5/5 bayt
+> bayt** aynı çıktı (58/58/61/99/77 bayt); ikinci tur sıfır yazım yaptı.
+
 **Linux → Windows replikasyonu.** Aynı kural, ayna simetrisi: **hedef tarafta
 radyo yokken yazılır.** BlueZ bond'ları adaptör kurulurken okur, Windows ise
 BTHPORT sürücüsü başlarken — yani radyo devri her iki tarafta da "taze oku"
@@ -438,6 +453,7 @@ Misafir **kapalı** olmalı; disk host'ta blok aygıtı olarak görünmeli.
 ```
 # doğrudan bir bölüm (dual boot, ya da kapalı passthrough disk)
 sudo mount -t ntfs3 -o ro /dev/<bölüm> /mnt/win
+btbond hive --discover                    # zaten bağlı Windows'ları listele
 sudo btbond hive /mnt/win                 # mount kökünü verin, kovanı bulur
 sudo btbond hive /mnt/win --dump          # ham satırlar (ajanla aynı biçim)
 
@@ -467,6 +483,24 @@ Hedefin **mevcut durumu da bu kanaldan** okunur; yanlış kanaldan okumak
 `ATLANDI`/`ÜZERİNE YAZILIYOR` hükmünü sessizce tersine çevirirdi. Yazım **tek
 commit**: parti sınırı Windows'un komut satırı sınırı içindi ve burada yok,
 üstelik tek commit yarım kalmış bir kaydı imkânsız kılıyor.
+
+**Kovan yedeği — offline yazımın ön koşulu.** `hivex` commit'i `SYSTEM`
+dosyasını **yerinde** yeniden yazar; bozulan kovan Windows'u açılmaz hâle
+getirir ve geri dönecek bir şey bırakmaz. Passthrough disk ve dual boot'ta
+qcow2 snapshot'ı da yoktur (bu makinede ölçüldü: misafirin Windows'u ham bir
+NVMe bölümünde). O yüzden yazımdan önce kovanın kopyası **host tarafına**
+alınır — misafirin diskine değil: bölüm `ro` bağlanmış olabilir ve oraya
+bırakılan dosya Windows'a görünür.
+
+```
+sudo btbond to-guest --offline /mnt/win                      # /var/backup/btbond
+sudo btbond to-guest --offline /mnt/win --backup-dir /yol    # başka yer
+sudo btbond to-guest --offline /mnt/win --no-backup          # geri dönüş YOK
+```
+
+Yedek **alınamazsa yazma hiç başlamaz**: yedeksiz yazmak, yedek isteyip
+alamamaktan ayrı bir karardır. Kopya kovanın tamamıdır, yani Windows'un bütün
+sırlarını taşır — dizin `0700`, dosya `0600` açılır, silmek kullanıcının işi.
 
 **Hızlı başlatma kapısı.** Hazırda bekletmeyle kapanmış Windows, kovana
 yazılanı dönüşte **sessizce kaybeder**. Araç bu yüzden yazmadan önce iki
@@ -596,14 +630,21 @@ eklerdi.
 
 ## Testler
 
-Misafir, root, terminal ve kovan gerektirmeyen üç sözleşme testi:
+Misafir, root, terminal ve kovan gerektirmeyen beş sözleşme testi:
 
 ```
 tests/test_emitters.py       # altın çıktı: yazma emitörleri aynı metni üretiyor mu
 tests/test_transport.py      # taşıyıcı ve model sözleşmeleri
+tests/test_hcicapture.py     # btmon/hcitool ayrıştırması
+tests/test_servicecache.py   # SDP önbelleği, kovan yedeği, bağlı Windows keşfi
 tests/test_tui.py            # TUI kararları (Textual'ın başsız sürücüsü)
 tests/test_emitters.py --update   # altın dosyayı KASITLI olarak yenile
 ```
+
+`test_servicecache.py`'nin dördü de **sessizce** bozulan sınıfta: ters çevrilmiş
+bir SDP sarmalı BlueZ'e ayrıştırma hatası olarak gider, alınmamış bir kovan
+yedeği ancak kovan bozulunca fark edilir, çözülmemiş bir `\040` kaçışı yanlış
+diske bakar, ve düşen bir rol-LTK bölümü zaten sessizdi.
 
 TUI testi arayüzün **kararlarını** ölçüyor, çizimini değil: hükümler modelden
 mi geliyor, kapı yıkıcı yolu kesiyor mu, `ANAHTAR FARKLI` kendiliğinden

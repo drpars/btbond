@@ -43,6 +43,7 @@ Dizin 0700, dosya 0600 — `/var/lib/bluetooth`'un kendi düzeniyle aynı.
 import configparser
 import os
 import re
+import shutil
 import sys
 import time
 from pathlib import Path
@@ -160,6 +161,88 @@ def service_records(root, adapter, dev):
         key = name[2:] if name.lower().startswith("0x") else name
         records[key] = value.strip().lower()
     return records
+
+
+def write_service_records(root, adapter, dev, records, force=False, dry_run=False,
+                          log=print):
+    """Misafirden gelen SDP kayıtlarını `cache/<mac>` dosyasına yaz.
+
+    NİÇİN — ters yönün ölçülmüş boşluğu: misafirde eşleştirilmiş bir cihazı
+    host'a getirdiğimizde host'ta SDP kaydı hiç olmuyor, ve `to-guest` o
+    durumda *"BlueZ cache'inde SDP kaydı yok"* uyarısını basıyordu. Kayıtların
+    iki taraftaki gövdesi **aynı** (ölçüldü 2026-09-05, beş kayıt) → ileri yön
+    `winbond.dynamic_record`, ters yön `winbond.plain_record`.
+
+    ÖNBELLEK BOND DEĞİL: eksikse BlueZ SDP'yi yeniden sorar, yani buradaki
+    yanlış bir kayıt bond'u bozmaz — ama var olan bir kaydı sessizce başkasıyla
+    değiştirmek de bu deponun yasağı. O yüzden kural üçe ayrılıyor:
+      - dosyada olmayan handle **eklenir** (kayıp yok, kazanç var),
+      - aynı değer duruyorsa **dokunulmaz** (yazma hiç olmaz),
+      - farklı değer duruyorsa yalnız `force` ile değiştirilir.
+    Var olan başka bölümler (`[General]`, `[Endpoints]`, `[Attributes]`) ve
+    listede olmayan handle'lar **korunur** — silme yok.
+
+    Döner: `{"added": n, "updated": n, "kept": n, "blocked": n, "path": yol}`.
+    """
+    path = Path(root) / adapter / "cache" / dev
+    parser = _parser()
+    if path.exists():
+        try:
+            with open(path, encoding="utf-8") as handle:
+                parser.read_file(handle)
+        except PermissionError:
+            sys.exit(f"{path} okunamadı — `sudo` ile çalıştırın")
+    if not parser.has_section("ServiceRecords"):
+        parser.add_section("ServiceRecords")
+
+    section = parser["ServiceRecords"]
+    current = {name.lower(): value.strip().lower() for name, value in section.items()}
+    stats = {"added": 0, "updated": 0, "kept": 0, "blocked": 0, "path": str(path)}
+
+    for handle, body in sorted(records.items()):
+        key = f"0x{handle.lower()}"
+        old = current.get(key)
+        if old is None:
+            section[key] = body.upper()
+            stats["added"] += 1
+        elif old == body.lower():
+            stats["kept"] += 1
+        elif force:
+            section[key] = body.upper()
+            stats["updated"] += 1
+        else:
+            stats["blocked"] += 1
+
+    if stats["added"] == 0 and stats["updated"] == 0:
+        return stats
+
+    if dry_run:
+        log(f"  [dry-run] {path}: +{stats['added']} yeni, "
+            f"~{stats['updated']} değişen SDP kaydı")
+        return stats
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    os.chmod(path.parent, 0o700)
+    if path.exists():
+        backup = path.with_name(f"{dev}.bak-{time.strftime('%Y%m%d-%H%M%S')}")
+        shutil.copyfile(path, backup)
+        os.chmod(backup, 0o600)
+        log(f"  yedek: {backup}")
+
+    # Atomik: yarım yazılmış bir önbellek dosyası BlueZ'i ayrıştırma hatasına
+    # sokar. Aynı dizine yazılıp `replace` ile takas ediliyor.
+    tmp = path.with_name(f".{dev}.tmp-{os.getpid()}")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        with os.fdopen(fd, "w") as handle:
+            parser.write(handle, space_around_delimiters=False)
+        os.replace(tmp, path)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+    log(f"  SDP önbelleği: {path} (+{stats['added']} yeni, "
+        f"~{stats['updated']} değişen)")
+    return stats
 
 
 def services(info):
@@ -363,6 +446,33 @@ def _signature_sections(bond, order, authenticated):
 PRESERVED_GENERAL = ("Class", "Services", "Appearance", "CablePairing", "WakeAllowed")
 PRESERVED_SECTIONS = ("ConnectionParameters", "DeviceID",
                       "LocalSignatureKey", "RemoteSignatureKey")
+
+# Rolü ters çevrilmiş LTK bölümleri. BlueZ belgesi (`doc/settings-storage.txt`)
+# `[PeripheralLongTermKey]` için *"Same as the [LongTermKey] group, except for
+# peripheral keys"* diyor; `[SlaveLongTermKey]` aynı bölümün eski adı.
+#
+# BU MAKİNEDE HİÇBİR CİHAZDA YOK (ölçüldü 2026-09-05, üç bond: Xbox, ROG fare,
+# Soundcore — hiçbirinde bölüm geçmiyor), o yüzden yazılmıyor: görülmemiş bir
+# bölümü uydurmak bu deponun yasakladığı şey. Ama bölüm bir gün VARSA ve biz
+# `[LongTermKey]`i yenilersek, taşıdığı anahtar tanımı gereği BAYATLAR.
+#
+# DIŞ İDDİA, ÖLÇÜLMEDİ (yaconsult/bluetooth-dualboot devlog, 2026-05-22): bir
+# HID fare yeniden bağlanmayı kendi başlattığında BlueZ bu bölümü kullanıyor ve
+# iki bölüm aynı anahtarı taşımazsa şifreleme **MIC Failure (0x3d)** ile
+# düşüyor. Bizim faremizde bölüm hiç yok ve cihaz çalışıyor, yani iddia burada
+# TEKRARLAMADI — ama düşürmenin sessiz olması bu deponun ödenmiş hatası.
+ROLE_LTK_SECTIONS = ("PeripheralLongTermKey", "SlaveLongTermKey")
+
+
+def stale_role_ltk(existing):
+    """Yenilenen bir `info`da bayatlayacak rol-LTK bölümlerini ver.
+
+    Döner: bölüm adlarının listesi (yoksa boş). Yazmaz, basmaz — kararı ve
+    mesajı çağıran verir.
+    """
+    if existing is None:
+        return []
+    return [s for s in ROLE_LTK_SECTIONS if existing.has_section(s)]
 
 
 def merge_preserved(existing, content):

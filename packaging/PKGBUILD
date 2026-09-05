@@ -54,7 +54,8 @@ check() {
   # Testler root, misafir, terminal ve kovan GEREKTİRMEZ (→ README, "Testler").
   # `test_tui.py` textual istiyor; yoksa atlanır, çünkü `python-textual`
   # `optdepends` ve `makedepends`te değil.
-  for t in tests/test_emitters.py tests/test_transport.py tests/test_hcicapture.py; do
+  for t in tests/test_emitters.py tests/test_transport.py \
+           tests/test_hcicapture.py tests/test_servicecache.py; do
     python "$t"
   done
   python -c 'import textual' 2>/dev/null && python tests/test_tui.py || true

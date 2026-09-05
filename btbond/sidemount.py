@@ -62,6 +62,60 @@ def free_nbd():
     raise MountError("boş nbd aygıtı yok (`modprobe nbd max_part=8`?)")
 
 
+def _unescape_mount(field):
+    """`/proc/mounts` sekizli kaçışlarını çöz (`\\040` → boşluk).
+
+    Çekirdek boşluk, sekme, yeni satır ve ters bölüyü kaçırıyor; çözülmezse
+    boşluklu bir mount noktası sessizce yanlış yola bakar.
+    """
+    out, i = [], 0
+    while i < len(field):
+        if field[i] == "\\" and field[i + 1:i + 4].isdigit() and len(field) >= i + 4:
+            out.append(chr(int(field[i + 1:i + 4], 8)))
+            i += 4
+        else:
+            out.append(field[i])
+            i += 1
+    return "".join(out)
+
+
+def locate_mounted_windows(mounts_file="/proc/mounts"):
+    """ZATEN BAĞLI Windows kurulumlarını bul. Döner: `[mount noktası, …]`.
+
+    NİÇİN — bir taraf her zaman bir libvirt domain'i değil. Dual boot'ta taraf
+    kimliği bir **disk yolu**dur ve `--offline` çıplak bir mount kökü zaten
+    alıyor; eksik olan tek şey kullanıcının o kökü elle bulmak zorunda
+    kalmasıydı. Bu fonksiyon hiçbir şey BAĞLAMAZ, yalnız okur.
+
+    ÖLÇÜT "NTFS mi" DEĞİL, `Windows/System32/config/SYSTEM` dosyasının
+    varlığı — düzenin sahibi `hivebond`, liste ikinci kez yazılmıyor. Aynı
+    ölçüt `Mounted._find_windows`ta da geçerli (bir kurtarma bölümü de
+    NTFS'tir).
+
+    `/dev/loop*` dışarıda: döngü aygıtı genellikle bir ISO ya da bizim kendi
+    nbd'mizin altındaki imaj olur, kullanıcının Windows'u değil.
+    """
+    found = []
+    try:
+        with open(mounts_file, encoding="utf-8") as handle:
+            lines = handle.readlines()
+    except OSError:
+        return found
+
+    for line in lines:
+        parts = line.split()
+        if len(parts) < 2:
+            continue
+        source, point = parts[0], _unescape_mount(parts[1])
+        if not source.startswith("/dev/") or source.startswith("/dev/loop"):
+            continue
+        for relative in hivebond.HIVE_RELATIVE:
+            if (Path(point) / relative).is_file():
+                found.append(point)
+                break
+    return found
+
+
 def partitions_of(block_dev):
     """`/dev/X`in bölümleri — sysfs'ten, ad tahmin etmeden."""
     base = Path(block_dev).name

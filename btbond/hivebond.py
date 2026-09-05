@@ -32,7 +32,9 @@ Kullanım:
 """
 
 import argparse
+import shutil
 import sys
+import time
 from pathlib import Path
 
 from . import winbond
@@ -41,6 +43,9 @@ try:
     from hivex import Hivex
 except ImportError:                                          # pragma: no cover
     Hivex = None
+
+# Yazmadan önce kovanın kopyası buraya alınır → `backup_hive`.
+BACKUP_DIR = "/var/backup/btbond"
 
 # Kovanın içindeki hive-göreli yol. `Windows/System32/config` altındaki ad
 # NTFS'te büyük/küçük harfe duyarsız, ama `ntfs3` gerçek yazımı gösterir.
@@ -175,11 +180,17 @@ def read_bonds(target):
     Döner: `(adapters, names, devices, service_flags, meta)` — `collect`in
     dörtlüsü artı kovan/set bilgisi. `service_flags` `LEFlags`in korunabilmesi
     için gerekiyor → `winbond.LEFLAGS_NOTU`.
+
+    `meta["sdp"]` misafirin SDP önbelleğini taşır (→
+    `winbond.cached_service_records`). Beşliyi altılıya çıkarmak yerine meta'ya
+    konuldu: üç çağıran var ve üçü de demeti açıyor.
     """
     text, hive_path, control_set = dump(target)
-    adapters, names, devices, service_flags = winbond.collect(winbond.parse_dump(text))
-    return adapters, names, devices, service_flags, {"hive": str(hive_path),
-                                                     "control_set": control_set}
+    tree = winbond.parse_dump(text)
+    adapters, names, devices, service_flags = winbond.collect(tree)
+    return adapters, names, devices, service_flags, {
+        "hive": str(hive_path), "control_set": control_set,
+        "sdp": winbond.cached_service_records(tree)}
 
 
 # --- YAZMA -----------------------------------------------------------------
@@ -339,11 +350,48 @@ def render_hive(ops, hive, params):
     return marks
 
 
-def apply_ops(target, ops, mount_root=None, dry_run=False, ignore_gate=False):
+def backup_hive(hive_path, backup_dir=BACKUP_DIR):
+    """Kovanı yazmadan ÖNCE host tarafına kopyala. Döner: yedeğin yolu.
+
+    NİÇİN — `hivex` commit'i dosyayı **yerinde** yeniden yazar ve geri alacak
+    bir şey bırakmaz. Bu makinedeki gerçek misafirin Windows'u ham bir NVMe
+    bölümünde (ÖLÇÜLDÜ 2026-09-05: `/dev/nvme1n1p3`, `virsh domblklist`te disk
+    yok — PCI passthrough), yani qcow2 snapshot'ı da YOK. Dual boot'ta durum
+    aynı. Bozulan kovan Windows'u açılmaz hâle getirir.
+
+    Yedek MİSAFİRİN diskine değil host'a alınır: misafirin bölümü hem `ro`
+    bağlanmış olabilir hem de oraya bırakılan dosya Windows'a görünür.
+
+    GİZLİLİK: kovan Windows'un bütün sırlarını taşır (bond anahtarları dahil).
+    Dizin 0700, dosya 0600 açılır; kopyayı silmek çağıranın işi.
+    """
+    hive_path = Path(hive_path)
+    target_dir = Path(backup_dir)
+    try:
+        target_dir.mkdir(parents=True, exist_ok=True)
+        target_dir.chmod(0o700)
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        dest = target_dir / f"{hive_path.name}-{stamp}"
+        shutil.copyfile(hive_path, dest)
+        dest.chmod(0o600)
+    except OSError as exc:
+        raise HiveError(
+            f"kovan yedeği alınamadı ({backup_dir}): {exc} — yazma YAPILMADI. "
+            f"Başka bir dizin için `--backup-dir`, bilerek atlamak için "
+            f"`--no-backup`.") from exc
+    return dest
+
+
+def apply_ops(target, ops, mount_root=None, dry_run=False, ignore_gate=False,
+              backup_dir=BACKUP_DIR):
     """IR'yi offline kovana yaz — kapıdan geçerse.
 
     `dry_run` dosyayı **write=True ile bile açmaz**: yalnız kapıyı ölçer ve
-    işlem sayısını verir.
+    işlem sayısını verir; yedek de alınmaz (yazılacak bir şey yok).
+
+    `backup_dir=None` yedeği atlar — çağıranın açıkça istemesi gerekir.
+    Yedek alınamazsa yazma **hiç başlamaz**: yedeksiz yazmak, yedek isteyip
+    alamamaktan farklı bir karardır.
 
     `ignore_gate` **yalnız doğrulama içindir ve CLI'da açılmadı.** Kapı,
     *"yaz sonra boot et"* yolunu koruyor: hızlı başlatmayla kapanmış Windows
@@ -371,12 +419,14 @@ def apply_ops(target, ops, mount_root=None, dry_run=False, ignore_gate=False):
         reason = f"KAPI AŞILDI (ignore_gate): {reason}"
 
     meta = {"hive": str(hive_path), "control_set": control_set,
-            "gate": reason, "ops": len(ops)}
+            "gate": reason, "ops": len(ops), "backup": None}
     if dry_run:
         return [], meta
 
     if Hivex is None:                                        # pragma: no cover
         raise HiveError("`hivex` Python bağlaması yok")
+    if backup_dir is not None:
+        meta["backup"] = str(backup_hive(hive_path, backup_dir))
     hive = Hivex(str(hive_path), write=True)
     node = hive.root()
     for name in (control_set, "Services", "BTHPORT", "Parameters"):
@@ -391,11 +441,27 @@ def apply_ops(target, ops, mount_root=None, dry_run=False, ignore_gate=False):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("target", metavar="YOL",
+    parser.add_argument("target", metavar="YOL", nargs="?",
                         help="mount kökü ya da doğrudan `SYSTEM` kovanı")
     parser.add_argument("--dump", action="store_true",
                         help="ham `V…` satırlarını bas (ajan çıktısıyla aynı biçim)")
+    parser.add_argument("--discover", action="store_true",
+                        help="zaten bağlı Windows kurulumlarını listele ve çık "
+                             "(dual boot: taraf kimliği bir disk yolu)")
     args = parser.parse_args()
+
+    if args.discover:
+        from . import sidemount
+        points = sidemount.locate_mounted_windows()
+        if not points:
+            print("bağlı Windows kurulumu bulunamadı — bölümü önce bağlayın "
+                  "(`mount /dev/… /mnt/win`), sonra `btbond hive /mnt/win`.")
+            return 1
+        for point in points:
+            print(point)
+        return 0
+    if not args.target:
+        parser.error("YOL gerekli (ya da `--discover`)")
 
     # `bondsync` MODEL katmanı; taşıyıcı ona bağımlı olmasın diye import
     # burada, modül başında değil.
